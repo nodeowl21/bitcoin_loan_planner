@@ -310,11 +310,14 @@ st.dataframe(pd.DataFrame(rebalancing_log))
 
 #st.plotly_chart(fig_leverage, use_container_width=True)
 
+st.markdown("---")
 st.markdown("""
-<hr style="margin-top: 2em; margin-bottom: 1em;">
-<div style="text-align: center;">
-  <p>🧡 If you like this tool, you can support it with a ⚡ Lightning tip:</p>
-  <p><a href="https://strike.me/nodeowl21" target="_blank" style="font-size: 1.2em;"><strong>strike.me/nodeowl21</strong></a></p>
-  <p style="margin-top: 2em; font-size: 0.9em; color: gray;">© 2025 nodeowl21 — Open Source • No Data Collected • Bitcoin only</p>
+<div style="text-align: center; font-size: 1.1em">
+  🧡 If you like this tool, you can support it with a ⚡ Lightning tip:<br>
+  <a href="https://strike.me/nodeowl21" target="_blank"><strong>strike.me/nodeowl21</strong></a>
+  <br><br>
+  <small>
+    © 2025 <a href="mailto:nodeowl21@proton.me">nodeowl21</a> — Open Source • No Data Collected • Bitcoin only
+  </small>
 </div>
 """, unsafe_allow_html=True)
