@@ -226,6 +226,7 @@ for i, date in enumerate(df.index):
 
 results = pd.DataFrame(data).set_index('Date')
 results["Net Worth"] = results["BTC"] * results["Price"] - results["Loan"]
+results["Net BTC"] = results["BTC"] - (results["Loan"] / results["Price"])
 
 # ---------- 📉 LTV Chart ----------
 st.subheader("📉 LTV Development (Interactive)")
@@ -251,14 +252,16 @@ fig.add_trace(go.Scatter(
     customdata=np.stack((
         results["BTC"],
         results["Loan"],
-        results["Net Worth"]
+        results["Net Worth"],
+        results["Net BTC"]
     ), axis=-1),
     hovertemplate=
     "Date: %{x|%Y-%m-%d}<br>" +
     "BTC Price: $%{y:,.2f}<br>" +
     "BTC Holdings: %{customdata[0]:.6f} BTC<br>" +
     "Loan incl. interest: $%{customdata[1]:,.2f}<br>" +
-    "Net Worth: $%{customdata[2]:,.2f}"
+    "Net Worth: $%{customdata[2]:,.2f}<br>" +
+    "Net BTC: %{customdata[3]:.6f} BTC"
 ))
 
 for _, row in pd.DataFrame(rebalancing_log).iterrows():
