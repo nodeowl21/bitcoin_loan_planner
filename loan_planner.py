@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-st.title("🔁 BTC Loan Planner")
+st.title("🟠 Bitcoin Loan Planner")
 
 # ---------- State Helper ----------
 
@@ -40,6 +40,12 @@ def generate_random_walk(years=5, annual_return=0.5, daily_volatility=0.05, seed
     dates = pd.date_range(start=start, periods=days + 1)
     return pd.DataFrame({'price': prices}, index=dates)
 
+st.markdown("""
+This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
+The core idea: BTC is purchased using borrowed capital, and added to the collateral securing the loan.
+As part of the strategy, **rebalancing** actions can be simulated – dynamically increasing or reducing BTC exposure depending on the BTC price development.
+""")
+
 # ---------- 📋 Loan Setup ----------
 st.header("📋 Setup Loan Plan")
 
@@ -48,13 +54,28 @@ default_price = live_price if live_price else 50000
 
 btc_owned = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), key="btc_owned")
 btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price")
-ltv = st.slider("Target LTV (%)", 10, 90, get_state_value("ltv", 20), key="ltv") / 100
+ltv = st.slider(
+    "Target LTV (%)", 10, 90,
+    get_state_value("ltv", 20),
+    key="ltv",
+    help="Target Loan-to-Value ratio (loan amount relative to total BTC collateral value, including BTC bought from credit)."
+) / 100
 
 max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv - 0.01), 3)
-rebalance_threshold_sell = st.slider("Rebalancing Threshold for Sell (%)", 1, int(max_rebalance_threshold_sell * 100),
-                                     get_state_value("rebalance_sell", 20), key="rebalance_sell") / 100
-rebalance_threshold_buy = st.slider("Rebalancing Threshold for Buy (%)", 1, 50,
-                                    get_state_value("rebalance_buy", 10), key="rebalance_buy") / 100
+rebalance_threshold_sell = st.slider(
+    "Rebalancing Threshold for Sell (%)", 1, int(max_rebalance_threshold_sell * 100),
+    get_state_value("rebalance_sell", 20),
+    key="rebalance_sell",
+    help="If LTV exceeds this threshold above target, BTC will be sold to reduce risk."
+) / 100
+
+rebalance_threshold_buy = st.slider(
+    "Rebalancing Threshold for Buy (%)", 1, 50,
+    get_state_value("rebalance_buy", 10),
+    key="rebalance_buy",
+    help="If LTV drops below this threshold under target, BTC will be bought using additional credit."
+) / 100
+
 interest_rate = st.slider("Loan Interest Rate (% p.a.)", 0, 20, get_state_value("interest", 10), key="interest") / 100
 
 safe_loan = (ltv * btc_owned * btc_price) / (1 - ltv)
@@ -83,7 +104,12 @@ loan = {
     'zinsen_fix': 0.0
 }
 
-sim_mode = st.radio("Choose Price Source", ["Historical", "Generated"], key="sim_mode")
+sim_mode = st.radio(
+    "Choose Price Source",
+    ["Historical", "Generated"],
+    key="sim_mode",
+    help="Choose between using historical BTC prices or a simulated random walk (based on expected return and volatility)."
+)
 
 if sim_mode == "Generated":
     years = st.slider("Number of Simulation Years", 1, 20, get_state_value("sim_years", 5), key="sim_years")
@@ -105,10 +131,13 @@ else:
     future_dates = pd.date_range(start=datetime.date.today(), periods=len(simulated_prices), freq='D')
     df = pd.DataFrame({'price': simulated_prices.values}, index=future_dates)
 
-interval = st.selectbox("Rebalancing Interval", ["Daily", "Weekly", "Monthly", "Yearly"],
-                        index=["Daily", "Weekly", "Monthly", "Yearly"].index(
-                            get_state_value("interval", "Weekly")),
-                        key="interval")
+interval = st.selectbox(
+    "Rebalancing Interval",
+    ["Daily", "Weekly", "Monthly", "Yearly"],
+    index=["Daily", "Weekly", "Monthly", "Yearly"].index(get_state_value("interval", "Weekly")),
+    key="interval",
+    help="How often rebalancing is evaluated and potentially executed."
+)
 
 rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[interval]
 
@@ -280,3 +309,12 @@ st.dataframe(pd.DataFrame(rebalancing_log))
 #)
 
 #st.plotly_chart(fig_leverage, use_container_width=True)
+
+st.markdown("""
+<hr style="margin-top: 2em; margin-bottom: 1em;">
+<div style="text-align: center;">
+  <p>🧡 If you like this tool, you can support it with a ⚡ Lightning tip:</p>
+  <p><a href="https://strike.me/nodeowl21" target="_blank" style="font-size: 1.2em;"><strong>strike.me/nodeowl21</strong></a></p>
+  <p style="margin-top: 2em; font-size: 0.9em; color: gray;">© 2025 nodeowl21 — Open Source • No Data Collected • Bitcoin only</p>
+</div>
+""", unsafe_allow_html=True)
