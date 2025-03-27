@@ -40,6 +40,24 @@ def generate_random_walk(years=5, annual_return=0.5, daily_volatility=0.05, seed
     dates = pd.date_range(start=start, periods=days + 1)
     return pd.DataFrame({'price': prices}, index=dates)
 
+def log_rebalancing(date, action, btc_delta, current_btc, current_loan, zinsen_fix, price, start_day, ltv_before):
+    zinsteil = current_loan * loan['interest_rate'] * (date.date() - start_day).days / 365
+    total_debt = current_loan + zinsen_fix + zinsteil
+    net_btc = current_btc - (total_debt / price)
+    ltv_after = total_debt / (current_btc * price) if current_btc > 0 else float('inf')
+
+    rebalancing_log.append({
+        "Date": date.date(),
+        "Action": action,
+        "BTC Δ": f'{btc_delta:+.6f} BTC',
+        "BTC after": f'{current_btc:.6f} BTC',
+        "Total Debt": f'{total_debt:.2f} $',
+        "Net BTC": f'{net_btc:.6f} BTC',
+        "Price": f'{price:.2f} $',
+        "LTV": ltv_after,
+        "LTV before": ltv_before  # <-- NEU
+    })
+
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
 The core idea: BTC is purchased using borrowed capital, and added to the collateral securing the loan.
@@ -170,16 +188,11 @@ for i, date in enumerate(df.index):
             btc_to_sell = max(0, btc_to_sell)
 
             if btc_to_sell > current_btc:
-                rebalancing_log.append({
-                    "Date": date.date(),
-                    "Action": "Liquidation",
-                    "BTC Δ": f'{-btc_to_sell:.6f} BTC',
-                    "BTC after": f'{current_btc - btc_to_sell:.6f} BTC',
-                    "Loan": f'{current_loan:.2f} $',
-                    "Net BTC": f'{((current_btc - btc_to_sell) - (current_loan / price)):.6f} BTC',
-                    "Price": f'{price:.2f} $',
-                    "LTV": current_ltv
-                })
+                btc_delta = -current_btc
+                current_btc = 0.0
+                zinsen_fix += zinsteil
+                start_day = date.date()
+                log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, zinsen_fix, price, start_day, current_ltv)
                 liquidated = True
                 st.error(f"❌ Liquidation on {date.date()} – BTC collateral insufficient")
             else:
@@ -204,32 +217,23 @@ for i, date in enumerate(df.index):
             delta_btc = btc_to_buy
 
     if rebalanced:
-        rebalancing_log.append({
-            "Date": date.date(),
-            "Action": action,
-            "BTC Δ": f'{delta_btc:.6f} BTC',
-            "BTC after": f'{current_btc:.6f} BTC',
-            "Loan": f'{current_loan:.2f} $',
-            "Net BTC": f'{(current_btc - (current_loan / price)):.6f} BTC',
-            "Price": f'{price:.2f} $',
-            "LTV": current_ltv
-        })
+        log_rebalancing(date, action, delta_btc, current_btc, current_loan, zinsen_fix, price, start_day, current_ltv)
 
     data.append({
         'Date': date,
         'Price': price,
         'BTC': current_btc,
-        'Loan': total_debt,
+        'Total Debt': total_debt,
         'Fixed Interest': zinsen_fix,
         'LTV': current_ltv
     })
 
 results = pd.DataFrame(data).set_index('Date')
-results["Net Worth"] = results["BTC"] * results["Price"] - results["Loan"]
-results["Net BTC"] = results["BTC"] - (results["Loan"] / results["Price"])
+results["Net Worth"] = results["BTC"] * results["Price"] - results["Total Debt"]
+results["Net BTC"] = results["BTC"] - (results["Total Debt"] / results["Price"])
 
 # ---------- 📉 LTV Chart ----------
-st.subheader("📉 LTV Development (Interactive)")
+st.subheader("📉 LTV Development")
 
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=results.index, y=results['LTV'], mode='lines', name='LTV', hovertemplate=
@@ -251,7 +255,7 @@ fig.add_trace(go.Scatter(
     line=dict(color='orange'),
     customdata=np.stack((
         results["BTC"],
-        results["Loan"],
+        results["Total Debt"],
         results["Net Worth"],
         results["Net BTC"]
     ), axis=-1),
@@ -259,7 +263,7 @@ fig.add_trace(go.Scatter(
     "Date: %{x|%Y-%m-%d}<br>" +
     "BTC Price: $%{y:,.2f}<br>" +
     "BTC Holdings: %{customdata[0]:.6f} BTC<br>" +
-    "Loan incl. interest: $%{customdata[1]:,.2f}<br>" +
+    "Total Debt: $%{customdata[1]:,.2f}<br>" +
     "Net Worth: $%{customdata[2]:,.2f}<br>" +
     "Net BTC: %{customdata[3]:.6f} BTC"
 ))
@@ -267,7 +271,7 @@ fig.add_trace(go.Scatter(
 for _, row in pd.DataFrame(rebalancing_log).iterrows():
     fig.add_trace(go.Scatter(
         x=[row['Date']],
-        y=[row['LTV']],
+        y=[row['LTV before']],
         mode='markers',
         name=row['Action'],
         marker=dict(
@@ -275,7 +279,7 @@ for _, row in pd.DataFrame(rebalancing_log).iterrows():
             symbol='x' if row['Action'] == 'Liquidation' else 'circle',
             color='red' if row['Action'] == 'Liquidation' else None
         ),
-        hovertemplate=f"{row['Action']} on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Loan: ${row['Loan']}<br>Price: ${row['Price']}<br>LTV: {row['LTV']}"
+        hovertemplate=f"{row['Action']} on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: ${row['Total Debt']}<br>Price: ${row['Price']}<br>LTV: {row['LTV before']}"
     ))
 
 fig.update_layout(
@@ -291,27 +295,54 @@ st.plotly_chart(fig, use_container_width=True)
 st.subheader("📘 Rebalancing Log")
 st.dataframe(pd.DataFrame(rebalancing_log))
 
-# ---------- 📊 Leverage Chart ----------
-#st.subheader("📊 Leverage Development (Loan per BTC)")
+def simulate_with_params(ltv_val, buy_thresh, sell_thresh):
+    # Temporäre lokale Parameter (Kopie)
+    ltv_local = ltv_val
+    rebuy_local = buy_thresh
+    resell_local = sell_thresh
+    interest_local = interest_rate  # nutze bestehenden globalen Zinssatz
 
-#results["Loan per BTC"] = results["Loan"] / results["BTC"]
+    # Starte mit Anfangs-BTC und -Preis
+    initial_price = btc_price
+    safe_loan = (ltv_local * btc_owned * initial_price) / (1 - ltv_local)
+    btc_bought = safe_loan / initial_price
+    total_btc = btc_owned + btc_bought
 
-#fig_leverage = go.Figure()
-#fig_leverage.add_trace(go.Scatter(
-#    x=results.index,
-#    y=results["Loan per BTC"],
-#    mode='lines',
-#    name='Loan per BTC',
-#    line=dict(color='red')
-#))
+    current_btc = total_btc
+    current_loan = safe_loan
+    zinsen_fix = 0.0
+    start_day = df.index[0].date()
 
-#fig_leverage.update_layout(
-#    yaxis=dict(title='Loan per BTC (USD)'),
-#    title='Leverage Over Time',
-#    showlegend=True
-#)
+    for i, date in enumerate(df.index):
+        days_passed = (date.date() - start_day).days
+        price = df.loc[date, 'price']
+        zinsteil = current_loan * interest_local * days_passed / 365
+        total_debt = current_loan + zinsen_fix + zinsteil
+        collateral = current_btc * price
+        current_ltv = total_debt / collateral if collateral > 0 else float('inf')
 
-#st.plotly_chart(fig_leverage, use_container_width=True)
+        if i % rebalance_days == 0:
+            abw = current_ltv - ltv_local
+            if abw > resell_local:
+                btc_to_sell = (total_debt - ltv_local * current_btc * price) / (price * (1 - ltv_local))
+                if btc_to_sell > current_btc:
+                    return -1e6  # Liquidierung → sehr schlechte Bewertung
+                current_btc -= btc_to_sell
+                current_loan -= btc_to_sell * price
+                zinsen_fix += zinsteil
+                start_day = date.date()
+
+            elif abw < -rebuy_local:
+                new_credit = (ltv_local * collateral - total_debt) / (1 - ltv_local)
+                btc_to_buy = new_credit / price
+                current_btc += btc_to_buy
+                current_loan += new_credit
+                zinsen_fix += zinsteil
+                start_day = date.date()
+
+    final_price = df.iloc[-1]['price']
+    net_btc = current_btc - (current_loan + zinsen_fix) / final_price
+    return net_btc  # Zielwert
 
 st.markdown("---")
 st.markdown("""
