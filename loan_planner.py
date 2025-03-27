@@ -40,9 +40,9 @@ def generate_random_walk(years=5, annual_return=0.5, daily_volatility=0.05, seed
     dates = pd.date_range(start=start, periods=days + 1)
     return pd.DataFrame({'price': prices}, index=dates)
 
-def log_rebalancing(date, action, btc_delta, current_btc, current_loan, zinsen_fix, price, start_day, ltv_before):
-    zinsteil = current_loan * loan['interest_rate'] * (date.date() - start_day).days / 365
-    total_debt = current_loan + zinsen_fix + zinsteil
+def log_rebalancing(date, action, btc_delta, current_btc, current_loan, fixed_interest, price, start_day, ltv_before):
+    accrued_interest = current_loan * loan['interest_rate'] * (date.date() - start_day).days / 365
+    total_debt = current_loan + fixed_interest + accrued_interest
     net_btc = current_btc - (total_debt / price)
     ltv_after = total_debt / (current_btc * price) if current_btc > 0 else float('inf')
 
@@ -119,7 +119,7 @@ loan = {
     'safe_loan': safe_loan,
     'btc_bought': btc_bought,
     'total_btc': total_btc,
-    'zinsen_fix': 0.0
+    'fixed_interest': 0.0
 }
 
 sim_mode = st.radio(
@@ -162,7 +162,7 @@ rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[interva
 # ---------- 🔄 Simulation Engine ----------
 current_btc = loan['total_btc']
 current_loan = loan['safe_loan']
-zinsen_fix = 0.0
+fixed_interest = 0.0
 start_day = df.index[0].date()
 data = []
 rebalancing_log = []
@@ -172,8 +172,8 @@ for i, date in enumerate(df.index):
     days_passed = (date.date() - start_day).days
     price = df.loc[date, 'price']
 
-    zinsteil = current_loan * loan['interest_rate'] * days_passed / 365
-    total_debt = current_loan + zinsen_fix + zinsteil
+    accrued_interest = current_loan * loan['interest_rate'] * days_passed / 365
+    total_debt = current_loan + fixed_interest + accrued_interest
     collateral = current_btc * price
     current_ltv = total_debt / collateral if collateral > 0 else float('inf')
     rebalanced = False
@@ -190,15 +190,15 @@ for i, date in enumerate(df.index):
             if btc_to_sell > current_btc:
                 btc_delta = -current_btc
                 current_btc = 0.0
-                zinsen_fix += zinsteil
+                fixed_interest += accrued_interest
                 start_day = date.date()
-                log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, zinsen_fix, price, start_day, current_ltv)
+                log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, fixed_interest, price, start_day, current_ltv)
                 liquidated = True
                 st.error(f"❌ Liquidation on {date.date()} – BTC collateral insufficient")
             else:
                 current_btc -= btc_to_sell
                 current_loan -= btc_to_sell * P
-                zinsen_fix += zinsteil
+                fixed_interest += accrued_interest
                 start_day = date.date()
                 rebalanced = True
                 action = "Sell"
@@ -210,21 +210,21 @@ for i, date in enumerate(df.index):
             btc_to_buy = new_credit / price
             current_btc += btc_to_buy
             current_loan += new_credit
-            zinsen_fix += zinsteil
+            fixed_interest += accrued_interest
             start_day = date.date()
             rebalanced = True
             action = "Buy"
             delta_btc = btc_to_buy
 
     if rebalanced:
-        log_rebalancing(date, action, delta_btc, current_btc, current_loan, zinsen_fix, price, start_day, current_ltv)
+        log_rebalancing(date, action, delta_btc, current_btc, current_loan, fixed_interest, price, start_day, current_ltv)
 
     data.append({
         'Date': date,
         'Price': price,
         'BTC': current_btc,
         'Total Debt': total_debt,
-        'Fixed Interest': zinsen_fix,
+        'Fixed Interest': fixed_interest,
         'LTV': current_ltv
     })
 
@@ -296,13 +296,11 @@ st.subheader("📘 Rebalancing Log")
 st.dataframe(pd.DataFrame(rebalancing_log))
 
 def simulate_with_params(ltv_val, buy_thresh, sell_thresh):
-    # Temporäre lokale Parameter (Kopie)
     ltv_local = ltv_val
     rebuy_local = buy_thresh
     resell_local = sell_thresh
-    interest_local = interest_rate  # nutze bestehenden globalen Zinssatz
+    interest_local = interest_rate
 
-    # Starte mit Anfangs-BTC und -Preis
     initial_price = btc_price
     safe_loan = (ltv_local * btc_owned * initial_price) / (1 - ltv_local)
     btc_bought = safe_loan / initial_price
@@ -310,14 +308,14 @@ def simulate_with_params(ltv_val, buy_thresh, sell_thresh):
 
     current_btc = total_btc
     current_loan = safe_loan
-    zinsen_fix = 0.0
+    fixed_interest = 0.0
     start_day = df.index[0].date()
 
     for i, date in enumerate(df.index):
         days_passed = (date.date() - start_day).days
         price = df.loc[date, 'price']
-        zinsteil = current_loan * interest_local * days_passed / 365
-        total_debt = current_loan + zinsen_fix + zinsteil
+        accrued_interest = current_loan * interest_local * days_passed / 365
+        total_debt = current_loan + fixed_interest + accrued_interest
         collateral = current_btc * price
         current_ltv = total_debt / collateral if collateral > 0 else float('inf')
 
@@ -329,7 +327,7 @@ def simulate_with_params(ltv_val, buy_thresh, sell_thresh):
                     return -1e6  # Liquidierung → sehr schlechte Bewertung
                 current_btc -= btc_to_sell
                 current_loan -= btc_to_sell * price
-                zinsen_fix += zinsteil
+                fixed_interest += accrued_interest
                 start_day = date.date()
 
             elif abw < -rebuy_local:
@@ -337,11 +335,11 @@ def simulate_with_params(ltv_val, buy_thresh, sell_thresh):
                 btc_to_buy = new_credit / price
                 current_btc += btc_to_buy
                 current_loan += new_credit
-                zinsen_fix += zinsteil
+                fixed_interest += accrued_interest
                 start_day = date.date()
 
     final_price = df.iloc[-1]['price']
-    net_btc = current_btc - (current_loan + zinsen_fix) / final_price
+    net_btc = current_btc - (current_loan + fixed_interest) / final_price
     return net_btc  # Zielwert
 
 st.markdown("---")
