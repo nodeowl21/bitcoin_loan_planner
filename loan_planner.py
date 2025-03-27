@@ -268,19 +268,54 @@ fig.add_trace(go.Scatter(
     "Net BTC: %{customdata[3]:.6f} BTC"
 ))
 
-for _, row in pd.DataFrame(rebalancing_log).iterrows():
-    fig.add_trace(go.Scatter(
-        x=[row['Date']],
-        y=[row['LTV before']],
-        mode='markers',
-        name=row['Action'],
-        marker=dict(
-            size=12,
-            symbol='x' if row['Action'] == 'Liquidation' else 'circle',
-            color='red' if row['Action'] == 'Liquidation' else None
-        ),
-        hovertemplate=f"{row['Action']} on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: ${row['Total Debt']}<br>Price: ${row['Price']}<br>LTV: {row['LTV before']}"
-    ))
+rebal_df = pd.DataFrame(rebalancing_log)
+
+# Gruppenweise Hovertext vorbereiten
+buy_mask = rebal_df["Action"] == "Buy"
+sell_mask = rebal_df["Action"] == "Sell"
+
+# Buy Marker
+fig.add_trace(go.Scatter(
+    x=rebal_df[buy_mask]["Date"],
+    y=rebal_df[buy_mask]["LTV before"],
+    mode='markers',
+    name="Buy",
+    marker=dict(size=12, symbol='circle', color='green'),
+    hovertext=[
+        f"Buy on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+        for _, row in rebal_df[buy_mask].iterrows()
+    ],
+    hoverinfo='text'
+))
+
+# Sell Marker
+fig.add_trace(go.Scatter(
+    x=rebal_df[sell_mask]["Date"],
+    y=rebal_df[sell_mask]["LTV before"],
+    mode='markers',
+    name="Sell",
+    marker=dict(size=12, symbol='circle', color='gold'),
+    hovertext=[
+        f"Sell on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+        for _, row in rebal_df[sell_mask].iterrows()
+    ],
+    hoverinfo='text'
+))
+
+# Liquidation Marker (bleibt einzeln für rote X-Marker)
+liq_mask = rebal_df["Action"] == "Liquidation"
+fig.add_trace(go.Scatter(
+    x=rebal_df[liq_mask]["Date"],
+    y=rebal_df[liq_mask]["LTV before"],
+    mode='markers',
+    name="Liquidation",
+    marker=dict(size=12, symbol='x', color='red'),
+    hovertext=[
+        f"Liquidation on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+        for _, row in rebal_df[liq_mask].iterrows()
+    ],
+    hoverinfo='text'
+))
 
 fig.update_layout(
     yaxis=dict(title='LTV'),
