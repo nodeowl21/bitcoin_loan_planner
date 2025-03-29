@@ -96,6 +96,13 @@ rebalance_threshold_buy = st.slider(
 
 interest_rate = st.slider("Loan Interest Rate (% p.a.)", 0, 20, get_state_value("interest", 10), key="interest") / 100
 
+liquidation_ltv = st.slider(
+    "Liquidation LTV (%)", 50, 100,
+    get_state_value("liquidation_ltv", 100),
+    key="liquidation_ltv",
+    help="If the actual LTV exceeds this value, forced liquidation is triggered."
+) / 100
+
 safe_loan = (ltv * btc_owned * btc_price) / (1 - ltv)
 btc_bought = safe_loan / btc_price
 total_btc = btc_owned + btc_bought
@@ -187,14 +194,15 @@ for i, date in enumerate(df.index):
             btc_to_sell = (D - ltv * B * P) / (P * (1 - ltv))
             btc_to_sell = max(0, btc_to_sell)
 
-            if btc_to_sell > current_btc:
+            if current_ltv > liquidation_ltv:
                 btc_delta = -current_btc
                 current_btc = 0.0
                 fixed_interest += accrued_interest
                 start_day = date.date()
                 log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, fixed_interest, price, start_day, current_ltv)
                 liquidated = True
-                st.error(f"❌ Liquidation on {date.date()} – BTC collateral insufficient")
+                st.error(f"❌ Liquidation on {date.date()} – LTV exceeded {liquidation_ltv:.0%}")
+
             else:
                 current_btc -= btc_to_sell
                 current_loan -= btc_to_sell * P
@@ -375,7 +383,7 @@ def simulate_with_params(ltv_val, buy_thresh, sell_thresh):
 
     final_price = df.iloc[-1]['price']
     net_btc = current_btc - (current_loan + fixed_interest) / final_price
-    return net_btc  # Zielwert
+    return net_btc
 
 st.markdown("---")
 st.markdown("""
