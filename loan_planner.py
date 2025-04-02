@@ -279,6 +279,7 @@ for i, date in enumerate(df.index):
         if real_ltv > liquidation_ltv:
             btc_delta = -current_btc
             current_btc = 0.0
+            current_loan = 0.0
             fixed_interest += accrued_interest
             start_day = date.date()
             log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, fixed_interest, price, start_day, real_ltv)
