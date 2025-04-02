@@ -447,6 +447,19 @@ with col2:
     st.metric("Net Value", f"${net_value:,.2f}", f"{net_value_diff:+,.2f} USD")
     st.metric("Total Interest Paid", f"${total_interest:,.2f}")
 
+# Max LTV während der Laufzeit
+max_ltv = results["LTV"].max()
+ltv_buffer = (liquidation_ltv - max_ltv) / liquidation_ltv
+
+# Einteilung nach Risiko
+if liquidated:
+    liquidation_risk = "❌ High"
+elif ltv_buffer < 0.20:
+    liquidation_risk = "⚠️ Medium"
+else:
+    liquidation_risk = "🟢 Low"
+
+st.metric("Liquidation Risk", liquidation_risk)
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; font-size: 1.1em">
