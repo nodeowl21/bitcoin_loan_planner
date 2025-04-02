@@ -257,29 +257,37 @@ for i, date in enumerate(df.index):
 
     accrued_interest = current_loan * loan['interest_rate'] * days_passed / 365
     total_debt = current_loan + fixed_interest + accrued_interest
-    collateral = current_btc * price
+
+    real_collateral = current_btc * price
+    real_ltv = total_debt / real_collateral if real_collateral > 0 else float('inf')
+
     if ltv_relative_to_ath:
         simulated_ath = df.loc[:date, 'price'].max()
         combined_ath = max(btc_ath, simulated_ath)
-        collateral = current_btc * combined_ath
-    current_ltv = total_debt / collateral if collateral > 0 else float('inf')
+        rebalance_collateral = current_btc * combined_ath
+        rebalance_ltv = total_debt / rebalance_collateral if rebalance_collateral > 0 else float('inf')
+    else:
+        rebalance_collateral = real_collateral
+        rebalance_ltv = real_ltv
+        combined_ath = price
+
     rebalanced = False
     action = ""
     delta_btc = 0.0
 
     if not liquidated:
-        if current_ltv > liquidation_ltv:
+        if real_ltv > liquidation_ltv:
             btc_delta = -current_btc
             current_btc = 0.0
+            current_loan = 0.0
             fixed_interest += accrued_interest
             start_day = date.date()
-            log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, fixed_interest, price, start_day,
-                            current_ltv)
+            log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, fixed_interest, price, start_day, real_ltv)
             liquidated = True
             st.error(f"❌ Liquidation on {date.date()} – LTV exceeded {liquidation_ltv:.0%}")
 
         elif i % rebalance_days == 0:
-            abw = current_ltv - ltv
+            abw = rebalance_ltv - ltv
 
             if enable_sell and abw > loan['rebalance_threshold_sell']:
                 D, P, B = total_debt, combined_ath, current_btc
@@ -295,7 +303,7 @@ for i, date in enumerate(df.index):
                 delta_btc = -btc_to_sell
 
             elif enable_buy and abw < -loan['rebalance_threshold_buy']:
-                new_credit = (ltv * collateral - total_debt) / (1 - ltv)
+                new_credit = (ltv * rebalance_collateral - total_debt) / (1 - ltv)
                 new_credit = max(0, new_credit)
                 btc_to_buy = new_credit / combined_ath
                 current_btc += btc_to_buy
@@ -306,10 +314,8 @@ for i, date in enumerate(df.index):
                 action = "Buy"
                 delta_btc = btc_to_buy
 
-
     if rebalanced:
-        log_rebalancing(date, action, delta_btc, current_btc, current_loan, fixed_interest, price, start_day,
-                        current_ltv)
+        log_rebalancing(date, action, delta_btc, current_btc, current_loan, fixed_interest, price, start_day, rebalance_ltv)
 
     data.append({
         'Date': date,
@@ -317,9 +323,9 @@ for i, date in enumerate(df.index):
         'BTC': current_btc,
         'Total Debt': total_debt,
         'Total Interest': fixed_interest,
-        'LTV': current_ltv
+        'LTV': rebalance_ltv,
+        'Real LTV': real_ltv
     })
-
 results = pd.DataFrame(data).set_index('Date')
 results["Net Worth"] = results["BTC"] * results["Price"] - results["Total Debt"]
 results["Net BTC"] = results["BTC"] - (results["Total Debt"] / results["Price"])
@@ -338,11 +344,9 @@ fig.add_trace(go.Scatter(
 ))
 
 if ltv_relative_to_ath:
-    ath_series = np.maximum(btc_ath, df["price"].cummax())
-    real_ltv = results["LTV"] * (ath_series / results["Price"])
     fig.add_trace(go.Scatter(
         x=results.index,
-        y=real_ltv,
+        y=results['Real LTV'],
         mode='lines',
         name='Real LTV',
         line=dict(dash='dash'),
@@ -448,7 +452,7 @@ if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
     liquidation_value = original_btc * end_price
     remaining_value = max(liquidation_value - end_total_debt, 0)
     net_btc = remaining_value / end_price
-    end_btc = net_btc  # In der Bilanz bleibt nur der Rest
+    end_btc = net_btc
     total_interest = float(str(last_liq["Total Interest"]).replace("$", "").replace(",", ""))
 else:
     end_price = df.iloc[-1]["price"]
