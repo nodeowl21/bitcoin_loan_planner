@@ -483,7 +483,7 @@ with col2:
     st.metric("Net Value", f"${net_value:,.2f}", f"{net_value_diff:+,.2f} USD")
     st.metric("Total Interest Paid", f"${total_interest:,.2f}")
 
-max_ltv = results["LTV"].max()
+max_ltv = results['Real LTV'].max()
 ltv_buffer = (liquidation_ltv - max_ltv) / liquidation_ltv
 
 if liquidated:
