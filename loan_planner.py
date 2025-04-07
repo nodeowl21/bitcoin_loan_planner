@@ -47,13 +47,13 @@ def generate_random_walk(years=5, annual_return=0.5, daily_volatility=0.05, seed
 def log_rebalancing(date, action, btc_delta, current_btc, current_loan, fixed_interest, price, start_day, ltv_before):
     accrued_interest = current_loan * loan['interest_rate'] * (date.date() - start_day).days / 365
     total_debt = current_loan + fixed_interest + accrued_interest
-    net_btc = current_btc - (total_debt / price)
     ltv_after = total_debt / (current_btc * price) if current_btc > 0 else float('inf')
 
     rebalancing_log.append({
         "Date": date.date(),
         "Action": action,
         "LTV before": ltv_before,
+        "LTV after": ltv_after,
         "BTC Δ": f'{btc_delta:+.6f} BTC',
         "Price": f'{price:.2f} $',
         "USD Spent": f'{btc_delta * price:.2f} $',
@@ -65,7 +65,7 @@ def log_rebalancing(date, action, btc_delta, current_btc, current_loan, fixed_in
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
 The core idea: BTC is purchased using borrowed capital, and added to the collateral securing the loan.
-As part of the strategy, **rebalancing** actions can be simulated – dynamically increasing or reducing BTC exposure depending on the BTC price development.
+As part of the strategy, rebalancing actions can be simulated – selling BTC to reduce liquidation risk or using rising collateral value to accumulate more.
 """)
 
 # ---------- 📋 Loan Setup ----------
@@ -117,7 +117,8 @@ live_price = get_live_btc_price()
 default_price = live_price if live_price else 50000
 
 btc_owned = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), key="btc_owned", step=0.1)
-btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price", step=1000)
+btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price",
+                            step=1000)
 
 liquidation_ltv_percent = int(st.session_state.get("liquidation_ltv", 100))
 max_ltv = liquidation_ltv_percent - 1
@@ -148,19 +149,35 @@ if enable_sell:
         key="rebalance_sell",
         help="If LTV exceeds this threshold above target, BTC will be sold to reduce risk."
     ) / 100
+    rebalance_sell_factor = st.slider(
+        "Sell Rebalancing Intensity (%)",
+        1, 100,
+        get_state_value("rebalance_sell_factor", 100),
+        help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced."
+    ) / 100
 else:
+    rebalance_sell_factor = 1.0
+
     rebalance_threshold_sell = 0.0
 
 enable_buy = st.checkbox("Enable Buy-Rebalancing", value=True, key="enable_buy")
 if enable_buy:
+    max_buy_threshold = int(ltv * 100) - 1
     rebalance_threshold_buy = st.slider(
         "Buy Threshold (%)",
-        1, 50,
-        get_state_value("rebalance_buy", 10),
+        1, max_buy_threshold,
+        get_state_value("rebalance_buy", min(10, max_buy_threshold)),
         key="rebalance_buy",
-        help="If LTV drops below this threshold under target, BTC will be bought using additional credit."
+        help=f"If LTV drops more than this below the target ({ltv:.0%}), BTC will be bought."
+    ) / 100
+    rebalance_buy_factor = st.slider(
+        "Buy Rebalancing Intensity (%)",
+        1, 100,
+        get_state_value("rebalance_buy_factor", 100),
+        help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced."
     ) / 100
 else:
+    rebalance_buy_factor = 1.0
     rebalance_threshold_buy = 0.0
 
 interest_rate = st.slider("Loan Interest Rate (% p.a.)", 0, 20, get_state_value("interest", 10), key="interest") / 100
@@ -289,28 +306,32 @@ for i, date in enumerate(df.index):
 
             if enable_sell and abw > loan['rebalance_threshold_sell']:
                 D, P, B = total_debt, combined_ath, current_btc
-                btc_to_sell = (D - ltv * B * P) / (P * (1 - ltv))
+                adjusted_ltv = ltv + loan['rebalance_threshold_sell'] * (1 - rebalance_sell_factor)
+                btc_to_sell = (D - adjusted_ltv * B * P) / (P * (1 - adjusted_ltv))
                 btc_to_sell = max(0, btc_to_sell)
 
-                current_btc -= btc_to_sell
-                current_loan -= btc_to_sell * P
-                fixed_interest += accrued_interest
-                start_day = date.date()
-                rebalanced = True
-                action = "Sell"
-                delta_btc = -btc_to_sell
+                if btc_to_sell > 0:
+                    current_btc -= btc_to_sell
+                    current_loan -= btc_to_sell * P
+                    fixed_interest += accrued_interest
+                    start_day = date.date()
+                    rebalanced = True
+                    action = "Sell"
+                    delta_btc = -btc_to_sell
 
             elif enable_buy and abw < -loan['rebalance_threshold_buy']:
-                new_credit = (ltv * rebalance_collateral - total_debt) / (1 - ltv)
+                adjusted_ltv = ltv - loan['rebalance_threshold_buy'] * (1 - rebalance_buy_factor)
+                new_credit = (adjusted_ltv * rebalance_collateral - total_debt) / (1 - adjusted_ltv)
                 new_credit = max(0, new_credit)
                 btc_to_buy = new_credit / combined_ath
-                current_btc += btc_to_buy
-                current_loan += new_credit
-                fixed_interest += accrued_interest
-                start_day = date.date()
-                rebalanced = True
-                action = "Buy"
-                delta_btc = btc_to_buy
+                if btc_to_buy > 0:
+                    current_btc += btc_to_buy
+                    current_loan += new_credit
+                    fixed_interest += accrued_interest
+                    start_day = date.date()
+                    rebalanced = True
+                    action = "Buy"
+                    delta_btc = btc_to_buy
 
     if rebalanced:
         log_rebalancing(date, action, delta_btc, current_btc, current_loan, fixed_interest, price, start_day,
