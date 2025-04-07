@@ -53,14 +53,12 @@ def log_rebalancing(date, action, btc_delta, current_btc, current_loan, fixed_in
     rebalancing_log.append({
         "Date": date.date(),
         "Action": action,
+        "LTV before": ltv_before,
         "BTC Δ": f'{btc_delta:+.6f} BTC',
-        "BTC after": f'{current_btc:.6f} BTC',
-        "Total Debt": f'{total_debt:.2f} $',
-        "Total Interest": f'{fixed_interest:.2f} $',
-        "Net BTC": f'{net_btc:.6f} BTC',
         "Price": f'{price:.2f} $',
-        "LTV": ltv_after,
-        "LTV before": ltv_before
+        "USD Spent": f'{btc_delta * price:.2f} $',
+        "New Total BTC": f'{current_btc:.6f} BTC',
+        "New Total Debt": f'{total_debt:.2f} $'
     })
 
 
@@ -118,8 +116,8 @@ if preset_name != "Custom":
 live_price = get_live_btc_price()
 default_price = live_price if live_price else 50000
 
-btc_owned = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), key="btc_owned")
-btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price")
+btc_owned = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), key="btc_owned", step=0.1)
+btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price", step=1000)
 
 liquidation_ltv_percent = int(st.session_state.get("liquidation_ltv", 100))
 max_ltv = liquidation_ltv_percent - 1
@@ -281,7 +279,8 @@ for i, date in enumerate(df.index):
             current_btc = 0.0
             fixed_interest += accrued_interest
             start_day = date.date()
-            log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, fixed_interest, price, start_day, real_ltv)
+            log_rebalancing(date, "Liquidation", btc_delta, current_btc, current_loan, fixed_interest, price, start_day,
+                            real_ltv)
             liquidated = True
             st.error(f"❌ Liquidation on {date.date()} – LTV exceeded {liquidation_ltv:.0%}")
 
@@ -314,7 +313,8 @@ for i, date in enumerate(df.index):
                 delta_btc = btc_to_buy
 
     if rebalanced:
-        log_rebalancing(date, action, delta_btc, current_btc, current_loan, fixed_interest, price, start_day, rebalance_ltv)
+        log_rebalancing(date, action, delta_btc, current_btc, current_loan, fixed_interest, price, start_day,
+                        rebalance_ltv)
 
     data.append({
         'Date': date,
@@ -395,7 +395,7 @@ if "Action" in rebal_df.columns:
         name="Buy",
         marker=dict(size=12, symbol='circle', color='green'),
         hovertext=[
-            f"Buy on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+            f"Buy on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
             for _, row in rebal_df[buy_mask].iterrows()
         ],
         hoverinfo='text'
@@ -408,7 +408,7 @@ if "Action" in rebal_df.columns:
         name="Sell",
         marker=dict(size=12, symbol='circle', color='gold'),
         hovertext=[
-            f"Sell on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+            f"Sell on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
             for _, row in rebal_df[sell_mask].iterrows()
         ],
         hoverinfo='text'
@@ -421,7 +421,7 @@ if "Action" in rebal_df.columns:
         name="Liquidation",
         marker=dict(size=12, symbol='x', color='red'),
         hovertext=[
-            f"Liquidation on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+            f"Liquidation on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
             for _, row in rebal_df[liq_mask].iterrows()
         ],
         hoverinfo='text'
@@ -446,7 +446,7 @@ st.markdown("## ✅ Loan Plan Summary")
 if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
     last_liq = rebal_df[rebal_df["Action"] == "Liquidation"].iloc[-1]
     end_price = float(str(last_liq["Price"]).replace("$", "").replace(",", ""))
-    end_total_debt = float(str(last_liq["Total Debt"]).replace("$", "").replace(",", ""))
+    end_total_debt = float(str(last_liq["New Total Debt"]).replace("$", "").replace(",", ""))
     original_btc = float(str(last_liq["BTC Δ"]).replace(" BTC", "").replace("+", "").replace(",", "").lstrip("-"))
     liquidation_value = original_btc * end_price
     remaining_value = max(liquidation_value - end_total_debt, 0)
