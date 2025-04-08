@@ -4,6 +4,8 @@ import requests
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import json
+
 
 st.title("🟠 Bitcoin Loan Planner")
 
@@ -61,6 +63,39 @@ def log_rebalancing(date, action, btc_delta, current_btc, current_loan, fixed_in
         "New Total Debt": f'{total_debt:.2f} $'
     })
 
+def get_strategy_config() -> dict:
+    return {
+        "btc_owned": st.session_state.get("btc_owned", 1.0),
+        "btc_price": st.session_state.get("btc_price", 50000),
+        "ltv": st.session_state.get("ltv", 0.20),
+        "rebalance_buy": st.session_state.get("rebalance_buy", 0.10),
+        "rebalance_sell": st.session_state.get("rebalance_sell", 0.10),
+        "rebalance_buy_factor": st.session_state.get("rebalance_buy_factor", 1.0),
+        "rebalance_sell_factor": st.session_state.get("rebalance_sell_factor", 1.0),
+        "enable_buy": st.session_state.get("enable_buy", True),
+        "enable_sell": st.session_state.get("enable_sell", True),
+        "interest": st.session_state.get("interest", 0.10),
+        "ltv_relative_to_ath": st.session_state.get("ltv_relative_to_ath", False),
+        "liquidation_ltv": st.session_state.get("liquidation_ltv", 1.0)
+    }
+
+def load_custom_strategy(file):
+    config = json.load(file)
+
+    st.session_state["btc_owned"] = config.get("btc_owned", 1.0)
+    st.session_state["btc_price"] = config.get("btc_price", 50000)
+    st.session_state["ltv"] = config.get("ltv", 0.20)
+    st.session_state["rebalance_buy"] = config.get("rebalance_buy", 0.10)
+    st.session_state["rebalance_sell"] = config.get("rebalance_sell", 0.10)
+    st.session_state["rebalance_buy_factor"] = config.get("rebalance_buy_factor", 1.0)
+    st.session_state["rebalance_sell_factor"] = config.get("rebalance_sell_factor", 1.0)
+    st.session_state["enable_buy"] = config.get("enable_buy", True)
+    st.session_state["enable_sell"] = config.get("enable_sell", True)
+    st.session_state["interest"] = config.get("interest", 0.10)
+    st.session_state["ltv_relative_to_ath"] = config.get("ltv_relative_to_ath", False)
+    st.session_state["liquidation_ltv"] = config.get("liquidation_ltv", 1.0)
+
+    st.success("✅ Strategy loaded successfully.")
 
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
@@ -153,6 +188,7 @@ if enable_sell:
         "Sell Rebalancing Intensity (%)",
         1, 100,
         get_state_value("rebalance_sell_factor", 100),
+        key="rebalance_sell_factor",
         help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced."
     ) / 100
 else:
@@ -174,8 +210,10 @@ if enable_buy:
         "Buy Rebalancing Intensity (%)",
         1, 100,
         get_state_value("rebalance_buy_factor", 100),
+        key="rebalance_buy_factor",
         help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced."
     ) / 100
+
 else:
     rebalance_buy_factor = 1.0
     rebalance_threshold_buy = 0.0
@@ -473,7 +511,7 @@ if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
     remaining_value = max(liquidation_value - end_total_debt, 0)
     net_btc = remaining_value / end_price
     end_btc = net_btc
-    total_interest = float(str(last_liq["Total Interest"]).replace("$", "").replace(",", ""))
+    total_interest = fixed_interest + accrued_interest
 else:
     end_price = df.iloc[-1]["price"]
     end_total_debt = results["Total Debt"].iloc[-1]
@@ -515,6 +553,27 @@ else:
     liquidation_risk = "🟢 Low"
 
 st.metric("Liquidation Risk", liquidation_risk)
+
+st.header("💾 Save or Load Custom Strategy")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    strategy_name = st.text_input("Strategy name", value="my_strategy")
+    json_str = json.dumps(get_strategy_config(), indent=2)
+    st.download_button(
+        label="💾 Download Strategy",
+        data=json_str,
+        file_name=f"{strategy_name}.json",
+        mime="application/json"
+    )
+
+with col2:
+    uploaded_strategy = st.file_uploader("📂 Load Strategy", type="json")
+    if uploaded_strategy is not None:
+        load_custom_strategy(uploaded_strategy)
+
+
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; font-size: 1.1em">
