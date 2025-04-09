@@ -314,15 +314,13 @@ for i, date in enumerate(df.index):
     real_collateral = current_btc * price
     real_ltv = total_debt / real_collateral if real_collateral > 0 else float('inf')
 
+    btc_ath = max(btc_ath, price)
     if ltv_relative_to_ath:
-        simulated_ath = df.loc[:date, 'price'].max()
-        combined_ath = max(btc_ath, simulated_ath)
-        rebalance_collateral = current_btc * combined_ath
+        rebalance_collateral = current_btc * btc_ath
         rebalance_ltv = total_debt / rebalance_collateral if rebalance_collateral > 0 else float('inf')
     else:
         rebalance_collateral = real_collateral
         rebalance_ltv = real_ltv
-        combined_ath = price
 
     rebalanced = False
     action = ""
@@ -343,7 +341,7 @@ for i, date in enumerate(df.index):
             abw = rebalance_ltv - ltv
 
             if enable_sell and abw > loan['rebalance_threshold_sell']:
-                D, P, B = total_debt, combined_ath, current_btc
+                D, P, B = total_debt, btc_ath, current_btc
                 adjusted_ltv = ltv + loan['rebalance_threshold_sell'] * (1 - rebalance_sell_factor)
                 btc_to_sell = (D - adjusted_ltv * B * P) / (P * (1 - adjusted_ltv))
                 btc_to_sell = max(0, btc_to_sell)
@@ -361,7 +359,7 @@ for i, date in enumerate(df.index):
                 adjusted_ltv = ltv - loan['rebalance_threshold_buy'] * (1 - rebalance_buy_factor)
                 new_credit = (adjusted_ltv * rebalance_collateral - total_debt) / (1 - adjusted_ltv)
                 new_credit = max(0, new_credit)
-                btc_to_buy = new_credit / combined_ath
+                btc_to_buy = new_credit / btc_ath
                 if btc_to_buy > 0:
                     current_btc += btc_to_buy
                     current_loan += new_credit
