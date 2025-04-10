@@ -286,12 +286,12 @@ rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[interva
 # ---------- 🔄 Simulation Engine ----------
 def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFrame, reference_value: float):
     ltv = config["ltv"] / 100
-    rebalance_buy = config["rebalance_buy"] / 100
-    rebalance_sell = config["rebalance_sell"] / 100
-    rebalance_buy_factor = config["rebalance_buy_factor"] / 100
-    rebalance_sell_factor = config["rebalance_sell_factor"] / 100
-    enable_buy = config["enable_buy"]
-    enable_sell = config["enable_sell"]
+    enable_buy = config.get("enable_buy", True)
+    rebalance_buy = config.get("rebalance_buy", 100) / 100
+    rebalance_buy_factor = config.get("rebalance_buy_factor", 100) / 100
+    enable_sell = config.get("enable_sell", True)
+    rebalance_sell = config.get("rebalance_sell", 100) / 100
+    rebalance_sell_factor = config.get("rebalance_sell_factor", 100) / 100
     fixed_interest = 0.0
     start_day = df.index[0].date()
     data = []
@@ -581,26 +581,22 @@ for strat_name in selected_strategies:
     btc_owned = strat_cfg.get("btc_owned", st.session_state.get("btc_owned", 1.0))
     btc_price = strat_cfg.get("btc_price", st.session_state.get("btc_price", 50000))
     ltv = strat_cfg.get("ltv", st.session_state.get("ltv", 0.20)) / 100
-    interest_rate = strat_cfg.get("interest", st.session_state.get("interest", 0.10))
     ltv_relative_to_ath = strat_cfg.get("ltv_relative_to_ath", st.session_state.get("ltv_relative_to_ath", False))
-    initial_ltv = ltv * (btc_ath / btc_price) if strat_cfg.get("ltv_relative_to_ath") else ltv
+
+    initial_ltv = ltv * (btc_ath / btc_price) if ltv_relative_to_ath else ltv
     safe_loan = (initial_ltv * btc_owned * btc_price) / (1 - initial_ltv)
     btc_bought = safe_loan / btc_price
     total_btc = btc_owned + btc_bought
 
-    simulation_values = []
-    fixed_interest = 0.0
-    for i, date in enumerate(df.index):
-        price = df.loc[date, 'price']
-        accrued_interest = safe_loan * interest_rate * (i / 365)
-        total_debt = safe_loan + fixed_interest + accrued_interest
-        net_worth = (total_btc * price) - total_debt
-        simulation_values.append(net_worth)
+    results, _ = run_simulation(strat_cfg, safe_loan, total_btc, df, btc_ath)
+
+    net_worth = results["Net Worth"].copy()
+    net_worth[net_worth < 0] = 0
 
     comparison_data.append({
         "name": strat_name,
-        "dates": df.index,
-        "net_worth": simulation_values
+        "dates": results.index,
+        "net_worth": net_worth
     })
 
 fig_compare = go.Figure()
