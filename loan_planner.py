@@ -329,6 +329,7 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
                 start_day = date.date()
                 action = "Liquidation"
                 liquidated = True
+                rebalanced = True
                 st.error(f"❌ Liquidation on {date.date()} – LTV exceeded {liquidation_ltv:.0%}")
 
             elif i % rebalance_days == 0:
