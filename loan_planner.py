@@ -323,7 +323,7 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
 
         if not liquidated:
             if real_ltv > liquidation_ltv:
-                btc_delta = -current_btc
+                delta_btc = -current_btc
                 current_btc = 0.0
                 fixed_interest += accrued_interest
                 start_day = date.date()
