@@ -1,10 +1,10 @@
-import streamlit as st
 import datetime
-import requests
-import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
 import json
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import requests
+import streamlit as st
 
 st.title("🟠 Bitcoin Loan Planner")
 
@@ -100,6 +100,13 @@ preset_descriptions = {
 
 if "strategy_presets" not in st.session_state:
     st.session_state["strategy_presets"] = {
+        "Custom": {
+            "ltv": 20,
+            "enable_buy": True,
+            "enable_sell": True,
+            "rebalance_buy": 10,
+            "rebalance_sell": 10
+        },
         "Defensive HODL": {
             "ltv": 10,
             "enable_buy": False,
@@ -126,14 +133,23 @@ if "strategy_presets" not in st.session_state:
         }
     }
 
+if "last_preset" not in st.session_state:
+    st.session_state["last_preset"] = "Custom"
+
 strategy_presets = st.session_state["strategy_presets"]
 
-preset_name = st.selectbox("Choose Strategy Preset", ["Custom"] + list(strategy_presets.keys()), key="strategy_preset")
-if preset_name != "Custom":
+preset_name = st.selectbox(
+    "Choose Strategy Preset",
+    list(strategy_presets.keys()),
+    index=list(strategy_presets.keys()).index(st.session_state["last_preset"]),
+    key="strategy_preset"
+)
+
+if preset_name != st.session_state["last_preset"]:
     preset = strategy_presets[preset_name]
     for k, v in preset.items():
         st.session_state[k] = v
-    st.success(f"Preset '{preset_name}' loaded: {preset_descriptions[preset_name]}")
+    st.session_state["last_preset"] = preset_name
 
 live_price = get_live_btc_price()
 default_price = live_price if live_price else 50000
@@ -142,6 +158,7 @@ btc_owned = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1
 btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price",
                             step=1000)
 
+strategy_inputs_disabled = preset_name != "Custom"
 liquidation_ltv_percent = int(st.session_state.get("liquidation_ltv", 100))
 max_ltv = liquidation_ltv_percent - 1
 
@@ -154,14 +171,14 @@ ltv = st.slider(
     get_state_value("ltv", min(20, max_ltv)),
     key="ltv",
     help="Target Loan-to-Value ratio (loan amount relative to total BTC collateral value, including BTC bought from credit)."
-) / 100
+    , disabled=strategy_inputs_disabled) / 100
 
 ltv_relative_to_ath = st.checkbox(
     "Rebalance LTV relative to BTC All-Time-High",
     value=False,
     help="LTV for loan and rebalancing is calculated relative to the current ATH, not the current price. This allows for higher leverage when the price is far below ATH and anchors risk to the long-term top instead of short-term price moves."
 )
-enable_sell = st.checkbox("Enable Sell-Rebalancing", value=True, key="enable_sell")
+enable_sell = st.checkbox("Enable Sell-Rebalancing", value=True, key="enable_sell", disabled=strategy_inputs_disabled)
 if enable_sell:
     max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv - 0.01), 3)
     rebalance_threshold_sell = st.slider(
@@ -169,21 +186,22 @@ if enable_sell:
         1, int(max_rebalance_threshold_sell * 100),
         get_state_value("rebalance_sell", 20),
         key="rebalance_sell",
-        help="If LTV exceeds this threshold above target, BTC will be sold to reduce risk."
-    ) / 100
+        help="If LTV exceeds this threshold above target, BTC will be sold to reduce risk.",
+        disabled=strategy_inputs_disabled) / 100
     rebalance_sell_factor = st.slider(
         "Sell Rebalancing Intensity (%)",
         1, 100,
         get_state_value("rebalance_sell_factor", 100),
         key="rebalance_sell_factor",
-        help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced."
+        help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced.",
+        disabled=strategy_inputs_disabled
     ) / 100
 else:
     rebalance_sell_factor = 1.0
 
     rebalance_threshold_sell = 0.0
 
-enable_buy = st.checkbox("Enable Buy-Rebalancing", value=True, key="enable_buy")
+enable_buy = st.checkbox("Enable Buy-Rebalancing", value=True, key="enable_buy", disabled=strategy_inputs_disabled)
 if enable_buy:
     max_buy_threshold = int(ltv * 100) - 1
     rebalance_threshold_buy = st.slider(
@@ -191,14 +209,16 @@ if enable_buy:
         1, max_buy_threshold,
         get_state_value("rebalance_buy", min(10, max_buy_threshold)),
         key="rebalance_buy",
-        help=f"If LTV drops more than this below the target ({ltv:.0%}), BTC will be bought."
+        help=f"If LTV drops more than this below the target ({ltv:.0%}), BTC will be bought.",
+        disabled=strategy_inputs_disabled
     ) / 100
     rebalance_buy_factor = st.slider(
         "Buy Rebalancing Intensity (%)",
         1, 100,
         get_state_value("rebalance_buy_factor", 100),
         key="rebalance_buy_factor",
-        help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced."
+        help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced.",
+        disabled=strategy_inputs_disabled
     ) / 100
 
 else:
@@ -213,6 +233,9 @@ liquidation_ltv = st.slider(
     key="liquidation_ltv",
     help="If the actual LTV exceeds this value, forced liquidation is triggered."
 ) / 100
+
+if preset_name == "Custom":
+    strategy_presets["Custom"] = get_strategy_config()
 
 df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
@@ -330,7 +353,6 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
                 action = "Liquidation"
                 liquidated = True
                 rebalanced = True
-                st.error(f"❌ Liquidation on {date.date()} – LTV exceeded {liquidation_ltv:.0%}")
 
             elif i % rebalance_days == 0:
                 abw = rebalance_ltv - ltv
@@ -570,13 +592,14 @@ st.header("📊 Strategy Comparison")
 selected_strategies = st.multiselect(
     "Select strategies to compare:",
     options=list(strategy_presets.keys()),
-    default=[preset_name] if preset_name != "Custom" else []
+    default=["Custom"] if preset_name == "Custom" else [preset_name]
 )
 
 comparison_data = []
 
 for strat_name in selected_strategies:
     strat_cfg = strategy_presets[strat_name]
+    strat_label = strat_name
 
     btc_owned = strat_cfg.get("btc_owned", st.session_state.get("btc_owned", 1.0))
     btc_price = strat_cfg.get("btc_price", st.session_state.get("btc_price", 50000))
@@ -590,39 +613,59 @@ for strat_name in selected_strategies:
 
     results, _ = run_simulation(strat_cfg, safe_loan, total_btc, df, btc_ath)
 
+    net_btc = results["Net BTC"].copy()
     net_worth = results["Net Worth"].copy()
     net_worth[net_worth < 0] = 0
 
     comparison_data.append({
         "name": strat_name,
         "dates": results.index,
-        "net_worth": net_worth
+        "net_worth": net_worth,
+        "net_btc": net_btc,
+        "ltv_series": results["LTV"].copy()
     })
 
+comparison_view = st.radio(
+    "View Mode",
+    options=["Net Worth", "LTV"],
+    horizontal=True
+)
 fig_compare = go.Figure()
-for entry in comparison_data:
+for strat in comparison_data:
+    y_data = strat["net_worth"] if comparison_view == "Net Worth" else strat["ltv_series"]
+
     fig_compare.add_trace(go.Scatter(
-        x=entry["dates"],
-        y=entry["net_worth"],
+        x=strat["dates"],
+        y=y_data,
         mode='lines',
-        name=entry["name"]
+        name=strat["name"],
+        hovertemplate=(
+            "Date: %{x|%Y-%m-%d}<br>"
+            "Net USD Value: $%{customdata[0]:,.2f}<br>"
+            "Net BTC: %{customdata[1]:.6f}<br>"
+            "LTV: %{customdata[2]:.2%}"
+        ),
+        customdata=np.stack((
+            strat["net_worth"],
+            strat["net_btc"],
+            strat["ltv_series"]
+        ), axis=-1)
     ))
 
 fig_compare.update_layout(
-    title="📊 Net Value Comparison of Strategies",
+    title=f"📊 Strategy Comparison – {comparison_view}",
     xaxis_title="Date",
-    yaxis_title="Net USD Value",
+    yaxis_title=comparison_view,
     legend=dict(orientation="h", y=-0.2)
 )
 
 st.plotly_chart(fig_compare, use_container_width=True)
-
 st.header("💾 Save or Load Custom Strategy")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    strategy_name = st.text_input("Strategy name", value="my_strategy")
+    strategy_name = st.text_input("Strategy name", value="Custom")
     json_str = json.dumps(get_strategy_config(), indent=2)
     st.download_button(
         label="💾 Download Strategy",
