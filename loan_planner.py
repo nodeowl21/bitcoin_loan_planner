@@ -138,11 +138,18 @@ btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price"
                             step=1000)
 
 st.subheader("Loan")
-interest_rate = st.slider("Loan Interest Rate (% p.a.)", 0, 20, get_state_value("interest", 10), key="interest") / 100
+interest_rate = st.number_input(
+    "Loan Interest Rate (% p.a.)",
+    min_value=0.0,
+    max_value=20.0,
+    value=get_state_value("interest", 12.5),
+    step=0.1,
+    key="interest"
+) / 100
 
 liquidation_ltv = st.slider(
     "Liquidation LTV (%)", 50, 100,
-    get_state_value("liquidation_ltv", 100),
+    get_state_value("liquidation_ltv", 85),
     key="liquidation_ltv",
     help="If the actual LTV exceeds this value, forced liquidation is triggered."
 ) / 100
