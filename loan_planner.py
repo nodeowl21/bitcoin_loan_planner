@@ -47,8 +47,6 @@ def generate_random_walk(years=5, annual_return=0.5, daily_volatility=0.05, seed
 
 def get_strategy_config() -> dict:
     return {
-        "btc_owned": st.session_state.get("btc_owned", 1.0),
-        "btc_price": st.session_state.get("btc_price", 50000),
         "ltv": st.session_state.get("ltv", 0.20),
         "rebalance_buy": st.session_state.get("rebalance_buy", 0.10),
         "rebalance_sell": st.session_state.get("rebalance_sell", 0.10),
@@ -56,9 +54,7 @@ def get_strategy_config() -> dict:
         "rebalance_sell_factor": st.session_state.get("rebalance_sell_factor", 1.0),
         "enable_buy": st.session_state.get("enable_buy", True),
         "enable_sell": st.session_state.get("enable_sell", True),
-        "interest": st.session_state.get("interest", 0.10),
         "ltv_relative_to_ath": st.session_state.get("ltv_relative_to_ath", False),
-        "liquidation_ltv": st.session_state.get("liquidation_ltv", 1.0)
     }
 
 
@@ -88,7 +84,7 @@ As part of the strategy, rebalancing actions can be simulated – selling BTC to
 """)
 
 # ---------- 📋 Loan Setup ----------
-st.header("📋 Setup Loan Plan")
+st.header("📋 Loan Plan Settings")
 
 # ---------- 🎯 Strategy Presets ----------
 preset_descriptions = {
@@ -110,55 +106,67 @@ if "strategy_presets" not in st.session_state:
         "Defensive HODL": {
             "ltv": 10,
             "enable_buy": False,
-            "enable_sell": False
+            "enable_sell": False,
         },
         "Balanced Rebalancer": {
             "ltv": 20,
             "rebalance_buy": 10,
             "rebalance_sell": 10,
             "enable_buy": True,
-            "enable_sell": True
+            "enable_sell": True,
         },
         "Aggressive Stacker": {
             "ltv": 35,
             "rebalance_buy": 5,
             "enable_buy": True,
-            "enable_sell": False
+            "enable_sell": False,
         },
         "Crash Resilient": {
             "ltv": 15,
             "rebalance_sell": 10,
             "enable_buy": False,
-            "enable_sell": True
+            "enable_sell": True,
         }
     }
-
-if "last_preset" not in st.session_state:
-    st.session_state["last_preset"] = "Custom"
-
-strategy_presets = st.session_state["strategy_presets"]
-
-preset_name = st.selectbox(
-    "Choose Strategy Preset",
-    list(strategy_presets.keys()),
-    index=list(strategy_presets.keys()).index(st.session_state["last_preset"]),
-    key="strategy_preset"
-)
-
-if preset_name != st.session_state["last_preset"]:
-    preset = strategy_presets[preset_name]
-    for k, v in preset.items():
-        st.session_state[k] = v
-    st.session_state["last_preset"] = preset_name
 
 live_price = get_live_btc_price()
 default_price = live_price if live_price else 50000
 
+st.subheader("Portfolio")
 btc_owned = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), key="btc_owned", step=0.1)
 btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price",
                             step=1000)
 
-strategy_inputs_disabled = preset_name != "Custom"
+st.subheader("Loan")
+interest_rate = st.slider("Loan Interest Rate (% p.a.)", 0, 20, get_state_value("interest", 10), key="interest") / 100
+
+liquidation_ltv = st.slider(
+    "Liquidation LTV (%)", 50, 100,
+    get_state_value("liquidation_ltv", 100),
+    key="liquidation_ltv",
+    help="If the actual LTV exceeds this value, forced liquidation is triggered."
+) / 100
+
+st.subheader("Strategy")
+
+strategy_presets = st.session_state["strategy_presets"]
+
+if "preset_to_select" in st.session_state:
+    st.session_state["preset_name"] = st.session_state.pop("preset_to_select")
+
+selected_preset = st.selectbox(
+    "Choose Preset",
+    list(strategy_presets.keys()),
+    index=list(strategy_presets.keys()).index(get_state_value("preset_name", "Custom")),
+    key="preset_name"
+)
+
+if st.session_state["preset_name"] != st.session_state.get("last_preset"):
+    preset_config = strategy_presets[st.session_state["preset_name"]]
+    for k, v in preset_config.items():
+        st.session_state[k] = v
+    st.session_state["last_preset"] = st.session_state["preset_name"]
+
 liquidation_ltv_percent = int(st.session_state.get("liquidation_ltv", 100))
 max_ltv = liquidation_ltv_percent - 1
 
@@ -171,14 +179,14 @@ ltv = st.slider(
     get_state_value("ltv", min(20, max_ltv)),
     key="ltv",
     help="Target Loan-to-Value ratio (loan amount relative to total BTC collateral value, including BTC bought from credit)."
-    , disabled=strategy_inputs_disabled) / 100
+) / 100
 
 ltv_relative_to_ath = st.checkbox(
     "Rebalance LTV relative to BTC All-Time-High",
     value=False,
     help="LTV for loan and rebalancing is calculated relative to the current ATH, not the current price. This allows for higher leverage when the price is far below ATH and anchors risk to the long-term top instead of short-term price moves."
 )
-enable_sell = st.checkbox("Enable Sell-Rebalancing", value=True, key="enable_sell", disabled=strategy_inputs_disabled)
+enable_sell = st.checkbox("Enable Sell-Rebalancing", value=True, key="enable_sell")
 if enable_sell:
     max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv - 0.01), 3)
     rebalance_threshold_sell = st.slider(
@@ -186,22 +194,21 @@ if enable_sell:
         1, int(max_rebalance_threshold_sell * 100),
         get_state_value("rebalance_sell", 20),
         key="rebalance_sell",
-        help="If LTV exceeds this threshold above target, BTC will be sold to reduce risk.",
-        disabled=strategy_inputs_disabled) / 100
+        help="If LTV exceeds this threshold above target, BTC will be sold to reduce risk."
+    ) / 100
     rebalance_sell_factor = st.slider(
         "Sell Rebalancing Intensity (%)",
         1, 100,
         get_state_value("rebalance_sell_factor", 100),
         key="rebalance_sell_factor",
-        help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced.",
-        disabled=strategy_inputs_disabled
+        help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced."
     ) / 100
 else:
     rebalance_sell_factor = 1.0
 
     rebalance_threshold_sell = 0.0
 
-enable_buy = st.checkbox("Enable Buy-Rebalancing", value=True, key="enable_buy", disabled=strategy_inputs_disabled)
+enable_buy = st.checkbox("Enable Buy-Rebalancing", value=True, key="enable_buy")
 if enable_buy:
     max_buy_threshold = int(ltv * 100) - 1
     rebalance_threshold_buy = st.slider(
@@ -209,33 +216,34 @@ if enable_buy:
         1, max_buy_threshold,
         get_state_value("rebalance_buy", min(10, max_buy_threshold)),
         key="rebalance_buy",
-        help=f"If LTV drops more than this below the target ({ltv:.0%}), BTC will be bought.",
-        disabled=strategy_inputs_disabled
+        help=f"If LTV drops more than this below the target ({ltv:.0%}), BTC will be bought."
     ) / 100
     rebalance_buy_factor = st.slider(
         "Buy Rebalancing Intensity (%)",
         1, 100,
         get_state_value("rebalance_buy_factor", 100),
         key="rebalance_buy_factor",
-        help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced.",
-        disabled=strategy_inputs_disabled
+        help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced."
     ) / 100
 
 else:
     rebalance_buy_factor = 1.0
     rebalance_threshold_buy = 0.0
 
-interest_rate = st.slider("Loan Interest Rate (% p.a.)", 0, 20, get_state_value("interest", 10), key="interest") / 100
+strategy_name_input = st.text_input(
+    label="Name",
+    value=st.session_state["preset_name"],
+    key="strategy_name_input",
+    placeholder="Preset name"
+)
 
-liquidation_ltv = st.slider(
-    "Liquidation LTV (%)", 50, 100,
-    get_state_value("liquidation_ltv", 100),
-    key="liquidation_ltv",
-    help="If the actual LTV exceeds this value, forced liquidation is triggered."
-) / 100
-
-if preset_name == "Custom":
-    strategy_presets["Custom"] = get_strategy_config()
+if st.button("💾 Save to Preset"):
+    name = strategy_name_input.strip()
+    if name:
+        st.session_state["strategy_presets"][name] = get_strategy_config()
+        st.session_state["preset_to_select"] = name
+        st.session_state["last_preset"] = None
+        st.rerun()
 
 df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
@@ -592,7 +600,7 @@ st.header("📊 Strategy Comparison")
 selected_strategies = st.multiselect(
     "Select strategies to compare:",
     options=list(strategy_presets.keys()),
-    default=["Custom"] if preset_name == "Custom" else [preset_name]
+    default=["Custom"]
 )
 
 comparison_data = []
@@ -660,24 +668,23 @@ fig_compare.update_layout(
 )
 
 st.plotly_chart(fig_compare, use_container_width=True)
-st.header("💾 Save or Load Custom Strategy")
 
-col1, col2 = st.columns(2)
 
-with col1:
-    strategy_name = st.text_input("Strategy name", value="Custom")
-    json_str = json.dumps(get_strategy_config(), indent=2)
-    st.download_button(
-        label="💾 Download Strategy",
-        data=json_str,
-        file_name=f"{strategy_name}.json",
-        mime="application/json"
-    )
+st.markdown("## ⚠️ Disclaimers & Assumptions")
+st.markdown("""
+- **Historical data is no guarantee for future performance.**  
+  Do not rely on the simulation results or optimize your strategy based on past data alone.
 
-with col2:
-    uploaded_strategy = st.file_uploader("📂 Load Strategy", type="json")
-    if uploaded_strategy is not None:
-        load_custom_strategy(uploaded_strategy)
+- **Not your keys, not your coins.**  
+  By taking out loans, you introduce third-party risk. Your broker or custodian could become insolvent in a crisis.
+
+- **The simulation excludes taxes, fees, spreads and edge conditions.**  
+  Penalties for early repayment or forced liquidation are not modeled.
+
+- **This tool does not constitute financial advice.**  
+  Use it for educational purposes and make your own informed decisions.
+""")
+
 
 st.markdown("---")
 st.markdown("""
