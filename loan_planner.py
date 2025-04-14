@@ -351,9 +351,9 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
             rebalance_collateral = current_btc * reference_value
             rebalance_ltv = total_debt / rebalance_collateral if rebalance_collateral > 0 else float('inf')
         else:
+            reference_value = price
             rebalance_collateral = real_collateral
             rebalance_ltv = real_ltv
-            reference_value = price
 
         rebalanced = False
         action = ""
@@ -404,7 +404,7 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
         if rebalanced:
             accrued_interest = current_loan * interest_rate * (date.date() - start_day).days / 365
             total_debt = current_loan + fixed_interest + accrued_interest
-            ltv_after = total_debt / (current_btc * price) if current_btc > 0 else float('inf')
+            ltv_after = total_debt / (current_btc * reference_value) if current_btc > 0 else float('inf')
 
             rebalancing_log.append({
                 "Date": date.date(),
