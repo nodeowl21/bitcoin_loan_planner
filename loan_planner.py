@@ -57,26 +57,6 @@ def get_strategy_config() -> dict:
         "ltv_relative_to_ath": st.session_state.get("ltv_relative_to_ath", False),
     }
 
-
-def load_custom_strategy(file):
-    config = json.load(file)
-
-    st.session_state["btc_owned"] = config.get("btc_owned", 1.0)
-    st.session_state["btc_price"] = config.get("btc_price", 50000)
-    st.session_state["ltv"] = config.get("ltv", 0.20)
-    st.session_state["rebalance_buy"] = config.get("rebalance_buy", 0.10)
-    st.session_state["rebalance_sell"] = config.get("rebalance_sell", 0.10)
-    st.session_state["rebalance_buy_factor"] = config.get("rebalance_buy_factor", 1.0)
-    st.session_state["rebalance_sell_factor"] = config.get("rebalance_sell_factor", 1.0)
-    st.session_state["enable_buy"] = config.get("enable_buy", True)
-    st.session_state["enable_sell"] = config.get("enable_sell", True)
-    st.session_state["interest"] = config.get("interest", 0.10)
-    st.session_state["ltv_relative_to_ath"] = config.get("ltv_relative_to_ath", False)
-    st.session_state["liquidation_ltv"] = config.get("liquidation_ltv", 1.0)
-
-    st.success("✅ Strategy loaded successfully.")
-
-
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
 The core idea: BTC is purchased using borrowed capital, and added to the collateral securing the loan.
@@ -268,11 +248,12 @@ with right_col:
             )
         with col_imp_exp[1]:
             if st.toggle("⬆️ Import Presets", value=False):
-                import_file = st.file_uploader("Upload JSON file", type="json")
+                import_file = st.file_uploader("Upload JSON file", type="json", key="file_uploader")
                 if import_file is not None:
                     try:
                         imported_presets = json.load(import_file)
                         st.session_state["strategy_presets"].update(imported_presets)
+                        del st.session_state["file_uploader"]
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Failed to import presets: {e}")
