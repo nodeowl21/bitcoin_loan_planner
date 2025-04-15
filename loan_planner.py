@@ -206,7 +206,7 @@ if enable_sell:
     rebalance_sell_factor = st.slider(
         "Sell Rebalancing Intensity (%)",
         1, 100,
-        get_state_value("rebalance_sell_factor", 100),
+        int(get_state_value("rebalance_sell_factor", 100)),
         key="rebalance_sell_factor",
         help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced."
     ) / 100
@@ -228,7 +228,7 @@ if enable_buy:
     rebalance_buy_factor = st.slider(
         "Buy Rebalancing Intensity (%)",
         1, 100,
-        get_state_value("rebalance_buy_factor", 100),
+        int(get_state_value("rebalance_buy_factor", 100)),
         key="rebalance_buy_factor",
         help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced."
     ) / 100
@@ -244,13 +244,39 @@ strategy_name_input = st.text_input(
     placeholder="Preset name"
 )
 
-if st.button("💾 Save to Preset"):
-    name = strategy_name_input.strip()
-    if name:
-        st.session_state["strategy_presets"][name] = get_strategy_config()
-        st.session_state["preset_to_select"] = name
-        st.session_state["last_preset"] = None
-        st.rerun()
+left_col, right_col = st.columns([1, 1])
+
+with left_col:
+    if st.button("💾 Save to Preset"):
+        name = strategy_name_input.strip()
+        if name:
+            st.session_state["strategy_presets"][name] = get_strategy_config()
+            st.session_state["preset_to_select"] = name
+            st.session_state["last_preset"] = None
+            st.rerun()
+
+with right_col:
+    with st.container():
+        col_imp_exp = st.columns(2)
+        with col_imp_exp[0]:
+            export_data = json.dumps(st.session_state["strategy_presets"], indent=2)
+            st.download_button(
+                label="⬇️ Export Presets",
+                data=export_data,
+                file_name="all_presets.json",
+                mime="application/json",
+                use_container_width=True
+            )
+        with col_imp_exp[1]:
+            if st.toggle("⬆️ Import Presets", value=False):
+                import_file = st.file_uploader("Upload JSON file", type="json")
+                if import_file is not None:
+                    try:
+                        imported_presets = json.load(import_file)
+                        st.session_state["strategy_presets"].update(imported_presets)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to import presets: {e}")
 
 df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
