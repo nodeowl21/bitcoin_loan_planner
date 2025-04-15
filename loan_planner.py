@@ -265,7 +265,6 @@ with right_col:
                 data=export_data,
                 file_name="all_presets.json",
                 mime="application/json",
-                use_container_width=True
             )
         with col_imp_exp[1]:
             if st.toggle("⬆️ Import Presets", value=False):
