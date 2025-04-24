@@ -150,13 +150,19 @@ if term_mode == "Set duration":
     new_term = st.number_input("Duration (months)", min_value=1, max_value=360, value=12, key="new_term")
 else:
     new_term = None
+new_liquidation_ltv = st.slider(
+    "Liquidation LTV (%)", 50, 100,
+    100,
+    key="new_liquidation_ltv",
+) / 100
 if st.button("➕ Add Loan"):
     new_loan = {
         "platform": new_platform,
         "amount": new_amount,
         "interest": new_interest,
         "start_date": new_start,
-        "term_months": new_term}
+        "term_months": new_term,
+        "liquidation_ltv": new_liquidation_ltv}
     st.session_state["portfolio_loans"].append(new_loan)
 
 if st.session_state["portfolio_loans"]:
@@ -206,84 +212,76 @@ st.subheader("Strategies")
 
 strategy_presets = st.session_state["strategy_presets"]
 
-if "preset_to_select" in st.session_state:
-    st.session_state["preset_name"] = st.session_state.pop("preset_to_select")
-
 selected_preset = st.selectbox(
     "Choose Preset",
     list(strategy_presets.keys()),
-    index=list(strategy_presets.keys()).index(get_state_value("preset_name", "Custom")),
     key="preset_name"
 )
 
-if st.session_state["preset_name"] != st.session_state.get("last_preset"):
-    preset_config = strategy_presets[st.session_state["preset_name"]]
-    for k, v in preset_config.items():
-        st.session_state[k] = v
+preset_changed = st.session_state.get("preset_name") != st.session_state.get("last_preset")
+preset_config = strategy_presets[st.session_state["preset_name"]]
+
+if preset_changed:
     st.session_state["last_preset"] = st.session_state["preset_name"]
+    st.session_state["ltv_input"] = int(preset_config.get("ltv", 20))
+    st.session_state["ltv_relative_to_ath_input"] = preset_config.get("ltv_relative_to_ath", False)
+    st.session_state["enable_sell_input"] = preset_config.get("enable_sell", True)
+    st.session_state["rebalance_sell_input"] = int(preset_config.get("rebalance_sell", 20))
+    st.session_state["rebalance_sell_factor_input"] = int(preset_config.get("rebalance_sell_factor", 100))
+    st.session_state["enable_buy_input"] = preset_config.get("enable_buy", True)
+    st.session_state["rebalance_buy_input"] = int(preset_config.get("rebalance_buy", 10))
+    st.session_state["rebalance_buy_factor_input"] = int(preset_config.get("rebalance_buy_factor", 100))
+    st.session_state["strategy_name_input"] = st.session_state["preset_name"]
 
-liquidation_ltv_percent = int(st.session_state.get("liquidation_ltv", 100))
-max_ltv = liquidation_ltv_percent - 1
-
-if "ltv" in st.session_state and st.session_state["ltv"] >= liquidation_ltv_percent:
-    st.session_state["ltv"] = max_ltv
-    st.warning(f"⚠️ Target LTV has been adjusted to {max_ltv}% to stay below the Liquidation LTV.")
-
-ltv = st.slider(
-    "Target LTV (%)", 1, max_ltv,
-    get_state_value("ltv", min(20, max_ltv)),
-    key="ltv",
-    help="Target Loan-to-Value ratio (loan amount relative to total BTC collateral value, including BTC bought from credit)."
-) / 100
-
-ltv_relative_to_ath = st.checkbox(
-    "Rebalance LTV relative to BTC All-Time-High",
-    value=False,
-    help="LTV for loan and rebalancing is calculated relative to the current ATH, not the current price. This allows for higher leverage when the price is far below ATH and anchors risk to the long-term top instead of short-term price moves."
+ltv_input = st.slider(
+    "Target LTV (%)", 1, 100,
+    int(preset_config.get("ltv", 20)),
+    key="ltv_input"
 )
-enable_sell = st.checkbox("Enable Sell-Rebalancing", value=True, key="enable_sell")
-if enable_sell:
-    max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv - 0.01), 3)
-    rebalance_threshold_sell = st.slider(
+
+ltv_relative_to_ath_input = st.checkbox(
+    "Rebalance LTV relative to BTC All-Time-High",
+    value=preset_config.get("ltv_relative_to_ath", False),
+    key="ltv_relative_to_ath_input"
+)
+
+enable_sell_input = st.checkbox("Enable Sell-Rebalancing", value=preset_config.get("enable_sell", True), key="enable_sell_input")
+if enable_sell_input:
+    max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv_input / 100 - 0.01), 3)
+    rebalance_sell_input = st.slider(
         "Sell Threshold (%)",
         1, int(max_rebalance_threshold_sell * 100),
-        get_state_value("rebalance_sell", 20),
-        key="rebalance_sell",
-        help="If LTV exceeds this threshold above target, BTC will be sold to reduce risk."
-    ) / 100
-    rebalance_sell_factor = st.slider(
+        int(preset_config.get("rebalance_sell", 20)),
+        key="rebalance_sell_input"
+    )
+    rebalance_sell_factor_input = st.slider(
         "Sell Rebalancing Intensity (%)",
         1, 100,
-        int(get_state_value("rebalance_sell_factor", 100)),
-        key="rebalance_sell_factor",
-        help="Defines how much of the excess above the target LTV will be reduced. For example, 50% means only half the distance back to the target LTV will be rebalanced."
-    ) / 100
+        int(preset_config.get("rebalance_sell_factor", 100)),
+        key="rebalance_sell_factor_input"
+    )
 else:
-    rebalance_sell_factor = 1.0
+    rebalance_sell_input = 0
+    rebalance_sell_factor_input = 1.0
 
-    rebalance_threshold_sell = 0.0
-
-enable_buy = st.checkbox("Enable Buy-Rebalancing", value=True, key="enable_buy")
-if enable_buy:
-    max_buy_threshold = int(ltv * 100) - 1
-    rebalance_threshold_buy = st.slider(
+enable_buy_input = st.checkbox("Enable Buy-Rebalancing", value=preset_config.get("enable_buy", True), key="enable_buy_input")
+if enable_buy_input:
+    max_buy_threshold = ltv_input - 1
+    rebalance_buy_input = st.slider(
         "Buy Threshold (%)",
         1, max_buy_threshold,
-        get_state_value("rebalance_buy", min(10, max_buy_threshold)),
-        key="rebalance_buy",
-        help=f"If LTV drops more than this below the target ({ltv:.0%}), BTC will be bought."
-    ) / 100
-    rebalance_buy_factor = st.slider(
+        int(preset_config.get("rebalance_buy", min(10, max_buy_threshold))),
+        key="rebalance_buy_input"
+    )
+    rebalance_buy_factor_input = st.slider(
         "Buy Rebalancing Intensity (%)",
         1, 100,
-        int(get_state_value("rebalance_buy_factor", 100)),
-        key="rebalance_buy_factor",
-        help="Defines how much of the gap below the target LTV will be closed. For example, 50% means only half the way back up to the target LTV will be rebalanced."
-    ) / 100
-
+        int(preset_config.get("rebalance_buy_factor", 100)),
+        key="rebalance_buy_factor_input"
+    )
 else:
-    rebalance_buy_factor = 1.0
-    rebalance_threshold_buy = 0.0
+    rebalance_buy_input = 0
+    rebalance_buy_factor_input = 1.0
 
 strategy_name_input = st.text_input(
     label="Name",
@@ -300,7 +298,16 @@ with left_col:
         if st.button("💾 Save Preset"):
             name = strategy_name_input.strip()
             if name:
-                st.session_state["strategy_presets"][name] = get_strategy_config()
+                st.session_state["strategy_presets"][name] = {
+                    "ltv": ltv_input,
+                    "ltv_relative_to_ath": ltv_relative_to_ath_input,
+                    "enable_sell": enable_sell_input,
+                    "rebalance_sell": rebalance_sell_input,
+                    "rebalance_sell_factor": rebalance_sell_factor_input,
+                    "enable_buy": enable_buy_input,
+                    "rebalance_buy": rebalance_buy_input,
+                    "rebalance_buy_factor": rebalance_buy_factor_input
+                }
                 st.session_state["preset_to_select"] = name
                 st.session_state["last_preset"] = None
                 st.rerun()
@@ -334,11 +341,12 @@ with right_col:
                     except Exception as e:
                         st.error(f"❌ Failed to import presets: {e}")
 
+
 df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
 
 # ---------- 📈 Simulation ----------
-st.header("📈 Price Simulation & Rebalancing")
+st.header("📈 Simulation & Rebalancing")
 
 sim_mode = st.radio(
     "Choose Price Source",
@@ -392,10 +400,16 @@ liquidation_ltv = st.slider(
     help="If the actual LTV exceeds this value, forced liquidation is triggered."
 ) / 100
 
+selected_sim_strategy = st.selectbox(
+    "Choose strategy for simulation:",
+    list(strategy_presets.keys()),
+    key="selected_sim_strategy"
+)
 
 # ---------- 🔄 Simulation Engine ----------
 def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_value: float):
-    ltv = config["ltv"] / 100
+    ltv = config.get("ltv", 0.2) / 100
+    st.markdown(ltv)
     enable_buy = config.get("enable_buy", True)
     rebalance_buy = config.get("rebalance_buy", 100) / 100
     rebalance_buy_factor = config.get("rebalance_buy_factor", 100) / 100
@@ -419,7 +433,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
         real_collateral = current_btc * price
         real_ltv = total_debt / real_collateral if real_collateral > 0 else float('inf')
 
-        if ltv_relative_to_ath:
+        if config.get("ltv_relative_to_ath", False):
             reference_value = max(btc_ath, max(reference_value, price))
             rebalance_collateral = current_btc * reference_value
             rebalance_ltv = total_debt / rebalance_collateral if rebalance_collateral > 0 else float('inf')
@@ -508,14 +522,16 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     results["Net BTC"] = results["BTC"] - (results["Total Debt"] / results["Price"])
     return results, rebalancing_log
 
+selected_strategy_cfg = strategy_presets[selected_sim_strategy]
 
-results, rebalancing_log = run_simulation(get_strategy_config(), total_btc, df, btc_ath)
+results, rebalancing_log = run_simulation(selected_strategy_cfg, total_btc, df, btc_ath)
 
+target_ltv = selected_strategy_cfg.get("ltv", 20) / 100
 # ---------- 📉 LTV Chart ----------
 st.subheader("📉 LTV Development")
 
 fig = go.Figure()
-ltv_line_name = "LTV relative to ATH" if ltv_relative_to_ath else "LTV"
+ltv_line_name = "LTV relative to ATH" if selected_strategy_cfg.get("ltv_relative_to_ath", False) else "LTV"
 fig.add_trace(go.Scatter(
     x=results.index,
     y=results['LTV'],
@@ -524,7 +540,7 @@ fig.add_trace(go.Scatter(
     hovertemplate="Date: %{x|%Y-%m-%d}<br>LTV: %{y:,.2f}"
 ))
 
-if ltv_relative_to_ath:
+if selected_strategy_cfg.get("ltv_relative_to_ath", False):
     fig.add_trace(go.Scatter(
         x=results.index,
         y=results['Real LTV'],
@@ -535,7 +551,7 @@ if ltv_relative_to_ath:
     ))
 fig.add_trace(go.Scatter(
     x=results.index,
-    y=[ltv] * len(results),
+    y=[target_ltv] * len(results),
     mode='lines',
     name='Target LTV',
     line=dict(dash='dash'),
@@ -611,7 +627,7 @@ if "Action" in rebal_df.columns:
 
 fig.update_layout(
     yaxis=dict(title='LTV'),
-    yaxis2=dict(title=f'BTC Price (`{currency_symbol}`)', overlaying='y', side='right'),
+    yaxis2=dict(title=f'BTC Price ({currency_symbol})', overlaying='y', side='right'),
     title='LTV & BTC Price with Rebalancing Events',
     legend=dict(orientation="h", y=-0.2)
 )
