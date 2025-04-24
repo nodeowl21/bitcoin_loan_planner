@@ -20,10 +20,11 @@ def get_state_value(key, default):
 # ---------- Fetch Live Price ----------
 def get_live_btc_price():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        currency = st.session_state.get("currency", "EUR").lower()
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies={currency}"
         response = requests.get(url, timeout=5)
         data = response.json()
-        return data["bitcoin"]["usd"]
+        return data["bitcoin"][currency]
     except:
         return None
 
@@ -56,6 +57,7 @@ def get_strategy_config() -> dict:
         "enable_sell": st.session_state.get("enable_sell", True),
         "ltv_relative_to_ath": st.session_state.get("ltv_relative_to_ath", False),
     }
+
 
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
@@ -112,29 +114,95 @@ if "strategy_presets" not in st.session_state:
 live_price = get_live_btc_price()
 default_price = live_price if live_price else 50000
 
+st.sidebar.markdown("## 📂 Portfolio Summary")
+
 st.subheader("Portfolio")
-btc_owned = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), key="btc_owned", step=0.1)
-btc_price = st.number_input("BTC Price (USD)", value=get_state_value("btc_price", default_price), key="btc_price",
-                            step=1000)
 
-st.subheader("Loan")
-interest_rate = st.number_input(
-    "Loan Interest Rate (% p.a.)",
-    min_value=0.0,
-    max_value=20.0,
-    value=get_state_value("interest", 12.5),
-    step=0.1,
-    key="interest"
-) / 100
+btc_owned_input = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), step=0.1)
+currency_input = st.selectbox("Currency", options=["EUR", "USD"],
+                              index=["EUR", "USD"].index(get_state_value("currency", "EUR")))
+currency_symbol = "$" if currency_input == "USD" else "€"
 
-liquidation_ltv = st.slider(
-    "Liquidation LTV (%)", 50, 100,
-    get_state_value("liquidation_ltv", 85),
-    key="liquidation_ltv",
-    help="If the actual LTV exceeds this value, forced liquidation is triggered."
-) / 100
+btc_price_input = st.number_input(
+    f"BTC Price ({currency_symbol})",
+    value=get_state_value("btc_price", default_price),
+    step=1000
+)
 
-st.subheader("Strategy")
+if st.button("📝 Save Portfolio"):
+    st.session_state["btc_owned"] = btc_owned_input
+    st.session_state["currency"] = currency_input
+    st.session_state["btc_price"] = btc_price_input
+    st.session_state["portfolio_saved"] = True
+
+st.subheader("Existing Loans")
+
+if "portfolio_loans" not in st.session_state:
+    st.session_state["portfolio_loans"] = []
+
+new_platform = st.text_input("Platform / Lender", key="new_platform")
+new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000)
+new_interest = st.number_input("Interest Rate (% p.a.)", min_value=0.0, max_value=50.0, value=5.0, key="new_interest",
+                               step=0.1)
+new_start = st.date_input("Start Date", value=datetime.date.today(), key="new_start")
+term_mode = st.selectbox("Loan Term", ["Unlimited", "Set duration"])
+if term_mode == "Set duration":
+    new_term = st.number_input("Duration (months)", min_value=1, max_value=360, value=12, key="new_term")
+else:
+    new_term = None
+if st.button("➕ Add Loan"):
+    new_loan = {
+        "platform": new_platform,
+        "amount": new_amount,
+        "interest": new_interest,
+        "start_date": new_start,
+        "term_months": new_term}
+    st.session_state["portfolio_loans"].append(new_loan)
+
+if st.session_state["portfolio_loans"]:
+    st.markdown("Current Loans")
+    for i, loan in enumerate(st.session_state["portfolio_loans"]):
+        cols = st.columns([1, 0.1])
+        with cols[0]:
+            if loan.get("term_months"):
+                end_date = loan["start_date"] + pd.DateOffset(months=loan["term_months"])
+                duration_str = f"{loan['term_months']} months (ends {end_date.date()})"
+            else:
+                duration_str = "Unlimited"
+
+            st.markdown(
+                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest']}% p.a. — {duration_str}"
+            )
+        with cols[1]:
+            if st.button("🗑️", key=f"delete_loan_{i}"):
+                st.session_state["portfolio_loans"].pop(i)
+                st.rerun()
+btc_owned = st.session_state["btc_owned"]
+total_btc = st.session_state["btc_owned"]
+btc_price = st.session_state["btc_price"]
+total_loan = 0
+total_debt = 0
+
+for loan in st.session_state.get("portfolio_loans", []):
+    total_loan += loan["amount"]
+    today = datetime.date.today()
+    if loan.get("term_months"):
+        end_date = loan["start_date"] + pd.DateOffset(months=loan["term_months"])
+        effective_end = min(end_date.date(), today)
+    else:
+        effective_end = today
+    days_passed = (effective_end - loan["start_date"]).days
+    interest = loan["amount"] * loan["interest"] * days_passed / 365
+    total_debt += loan["amount"] + interest
+
+portfolio_value = total_btc * st.session_state["btc_price"]
+ltv = total_debt / portfolio_value if portfolio_value > 0 else float("inf")
+
+st.sidebar.metric("📈 Total BTC", f"{total_btc:.6f}")
+st.sidebar.metric("💵 Total Debt", f"{currency_symbol}{total_debt:,.2f}")
+st.sidebar.metric("📊 LTV", f"{ltv:.2%}")
+
+st.subheader("Strategies")
 
 strategy_presets = st.session_state["strategy_presets"]
 
@@ -227,14 +295,22 @@ strategy_name_input = st.text_input(
 left_col, right_col = st.columns([1, 1])
 
 with left_col:
-    if st.button("💾 Save to Preset"):
-        name = strategy_name_input.strip()
-        if name:
-            st.session_state["strategy_presets"][name] = get_strategy_config()
-            st.session_state["preset_to_select"] = name
-            st.session_state["last_preset"] = None
-            st.rerun()
-
+    col_save_delete = st.columns(2)
+    with col_save_delete[0]:
+        if st.button("💾 Save Preset"):
+            name = strategy_name_input.strip()
+            if name:
+                st.session_state["strategy_presets"][name] = get_strategy_config()
+                st.session_state["preset_to_select"] = name
+                st.session_state["last_preset"] = None
+                st.rerun()
+    with col_save_delete[1]:
+        if strategy_name_input not in ["Custom"]:
+            if st.button("🗑️ Delete Preset"):
+                del st.session_state["strategy_presets"][strategy_name_input]
+                st.session_state["preset_to_select"] = "Custom"
+                st.session_state["last_preset"] = None
+                st.rerun()
 with right_col:
     with st.container():
         col_imp_exp = st.columns(2)
@@ -260,35 +336,9 @@ with right_col:
 
 df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
-initial_ltv = ltv * (btc_ath / btc_price) if ltv_relative_to_ath else ltv
-
-safe_loan = (initial_ltv * btc_owned * btc_price) / (1 - initial_ltv)
-btc_bought = safe_loan / btc_price
-total_btc = btc_owned + btc_bought
-yearly_interest = safe_loan * interest_rate
-
-st.subheader("💰 Initial Loan Summary")
-st.markdown(f"- **Loan Amount (USD):** `${safe_loan:,.2f}`")
-if ltv_relative_to_ath:
-    st.markdown(f"- **Effective Real LTV:** `{initial_ltv:.2%}` ({ltv:.2%} based on ATH: ${btc_ath:,.0f})")
-st.markdown(f"- **BTC Purchased with Loan:** `{btc_bought:.6f}` BTC")
-st.markdown(f"- **Total BTC after Loan:** `{total_btc:.6f}` BTC")
-st.markdown(f"- **Annual Interest:** `${yearly_interest:,.2f}`")
 
 # ---------- 📈 Simulation ----------
 st.header("📈 Price Simulation & Rebalancing")
-
-loan = {
-    'btc_owned': btc_owned,
-    'btc_price': btc_price,
-    'rebalance_threshold_sell': rebalance_threshold_sell,
-    'rebalance_threshold_buy': rebalance_threshold_buy,
-    'interest_rate': interest_rate,
-    'safe_loan': safe_loan,
-    'btc_bought': btc_bought,
-    'total_btc': total_btc,
-    'fixed_interest': 0.0
-}
 
 sim_mode = st.radio(
     "Choose Price Source",
@@ -312,7 +362,7 @@ else:
     start_date = end_date - pd.DateOffset(years=num_years)
     price_series = df.loc[start_date:end_date]
     price_rel = price_series / price_series.iloc[0]
-    simulated_prices = price_rel * loan['btc_price']
+    simulated_prices = price_rel * btc_price
     future_dates = pd.date_range(start=datetime.date.today(), periods=len(simulated_prices), freq='D')
     df = pd.DataFrame({'price': simulated_prices.values}, index=future_dates)
 
@@ -326,9 +376,25 @@ interval = st.selectbox(
 
 rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[interval]
 
+interest_rate = st.number_input(
+    "Loan Interest Rate (% p.a.)",
+    min_value=0.0,
+    max_value=20.0,
+    value=get_state_value("interest", 12.5),
+    step=0.1,
+    key="interest"
+) / 100
+
+liquidation_ltv = st.slider(
+    "Liquidation LTV (%)", 50, 100,
+    get_state_value("liquidation_ltv", 85),
+    key="liquidation_ltv",
+    help="If the actual LTV exceeds this value, forced liquidation is triggered."
+) / 100
+
 
 # ---------- 🔄 Simulation Engine ----------
-def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFrame, reference_value: float):
+def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_value: float):
     ltv = config["ltv"] / 100
     enable_buy = config.get("enable_buy", True)
     rebalance_buy = config.get("rebalance_buy", 100) / 100
@@ -341,6 +407,7 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
     data = []
     rebalancing_log = []
     liquidated = False
+    current_loan = 0
 
     for i, date in enumerate(price_df.index):
         days_passed = (date.date() - start_day).days
@@ -418,10 +485,10 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
                 "LTV before": rebalance_ltv,
                 "LTV after": ltv_after,
                 "BTC Δ": f'{delta_btc:+.6f} BTC',
-                "Price": f'{price:.2f} $',
-                "USD Spent": f'{delta_btc * price:.2f} $',
+                "Price": f'{price:.2f} {currency_symbol}',
+                f"{currency_symbol} Spent": f'{delta_btc * price:.2f} {currency_symbol}',
                 "New Total BTC": f'{current_btc:.6f} BTC',
-                "New Total Debt": f'{total_debt:.2f} $'
+                "New Total Debt": f'{total_debt:.2f} `{currency_symbol}`'
             })
 
         data.append({
@@ -442,7 +509,7 @@ def run_simulation(config: dict, current_loan, current_btc, price_df: pd.DataFra
     return results, rebalancing_log
 
 
-results, rebalancing_log = run_simulation(get_strategy_config(), loan['safe_loan'], loan['total_btc'], df, btc_ath)
+results, rebalancing_log = run_simulation(get_strategy_config(), total_btc, df, btc_ath)
 
 # ---------- 📉 LTV Chart ----------
 st.subheader("📉 LTV Development")
@@ -489,10 +556,10 @@ fig.add_trace(go.Scatter(
     ), axis=-1),
     hovertemplate=
     "Date: %{x|%Y-%m-%d}<br>" +
-    "BTC Price: $%{y:,.2f}<br>" +
+    "BTC Price: {currency_symbol}%{y:,.2f}<br>" +
     "BTC Holdings: %{customdata[0]:.6f} BTC<br>" +
-    "Total Debt: $%{customdata[1]:,.2f}<br>" +
-    "Net Worth: $%{customdata[2]:,.2f}<br>" +
+    "Total Debt: {currency_symbol}%{customdata[1]:,.2f}<br>" +
+    "Net Worth: {currency_symbol}%{customdata[2]:,.2f}<br>" +
     "Net BTC: %{customdata[3]:.6f} BTC"
 ))
 
@@ -544,7 +611,7 @@ if "Action" in rebal_df.columns:
 
 fig.update_layout(
     yaxis=dict(title='LTV'),
-    yaxis2=dict(title='BTC Price (USD)', overlaying='y', side='right'),
+    yaxis2=dict(title=f'BTC Price (`{currency_symbol}`)', overlaying='y', side='right'),
     title='LTV & BTC Price with Rebalancing Events',
     legend=dict(orientation="h", y=-0.2)
 )
@@ -561,8 +628,8 @@ st.markdown("## ✅ Loan Plan Summary")
 liquidated = False
 if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
     last_liq = rebal_df[rebal_df["Action"] == "Liquidation"].iloc[-1]
-    end_price = float(str(last_liq["Price"]).replace("$", "").replace(",", ""))
-    end_total_debt = float(str(last_liq["New Total Debt"]).replace("$", "").replace(",", ""))
+    end_price = float(str(last_liq["Price"]).replace("`{currency_symbol}`", "").replace(",", ""))
+    end_total_debt = float(str(last_liq["New Total Debt"]).replace("`{currency_symbol}`", "").replace(",", ""))
     original_btc = float(str(last_liq["BTC Δ"]).replace(" BTC", "").replace("+", "").replace(",", "").lstrip("-"))
     liquidation_value = original_btc * end_price
     remaining_value = max(liquidation_value - end_total_debt, 0)
@@ -590,11 +657,11 @@ col1, col2 = st.columns(2)
 with col1:
     st.metric("Total BTC", f"{end_btc:.6f} BTC", f"{btc_diff:+.6f} BTC")
     st.metric("Net BTC", f"{net_btc:.6f} BTC", f"{net_btc_diff:+.6f} BTC")
-    st.metric("Total Debt (incl. interest)", f"${end_total_debt:,.2f}")
+    st.metric("Total Debt (incl. interest)", f"{currency_symbol}{end_total_debt:,.2f}")
 with col2:
-    st.metric("Total Value", f"${end_value:,.2f}", f"{value_diff:+,.2f} USD")
-    st.metric("Net Value", f"${net_value:,.2f}", f"{net_value_diff:+,.2f} USD")
-    st.metric("Total Interest Paid", f"${total_interest:,.2f}")
+    st.metric("Total Value", f"{currency_symbol}{end_value:,.2f}", f"{value_diff:+,.2f} {currency_symbol}")
+    st.metric("Net Value", f"{currency_symbol}{net_value:,.2f}", f"{net_value_diff:+,.2f} {currency_symbol}")
+    st.metric("Total Interest Paid", f"{currency_symbol}{total_interest:,.2f}")
 
 max_ltv = results['Real LTV'].max()
 ltv_buffer = (liquidation_ltv - max_ltv) / liquidation_ltv
@@ -632,7 +699,7 @@ for strat_name in selected_strategies:
     btc_bought = safe_loan / btc_price
     total_btc = btc_owned + btc_bought
 
-    results, _ = run_simulation(strat_cfg, safe_loan, total_btc, df, btc_ath)
+    results, _ = run_simulation(strat_cfg, total_btc, df, btc_ath)
 
     net_btc = results["Net BTC"].copy()
     net_worth = results["Net Worth"].copy()
@@ -662,7 +729,7 @@ for strat in comparison_data:
         name=strat["name"],
         hovertemplate=(
             "Date: %{x|%Y-%m-%d}<br>"
-            "Net USD Value: $%{customdata[0]:,.2f}<br>"
+            "Net Value: {currency_symbol}%{customdata[0]:,.2f}<br>"
             "Net BTC: %{customdata[1]:.6f}<br>"
             "LTV: %{customdata[2]:.2%}"
         ),
@@ -682,7 +749,6 @@ fig_compare.update_layout(
 
 st.plotly_chart(fig_compare, use_container_width=True)
 
-
 st.markdown("## ⚠️ Disclaimers & Assumptions")
 st.markdown("""
 - **Historical data is no guarantee for future performance.**  
@@ -697,7 +763,6 @@ st.markdown("""
 - **This tool does not constitute financial advice.**  
   Use it for educational purposes and make your own informed decisions.
 """)
-
 
 st.markdown("---")
 st.markdown("""
