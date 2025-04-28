@@ -138,7 +138,14 @@ if st.button("📝 Save Portfolio"):
 st.subheader("Existing Loans")
 
 if "portfolio_loans" not in st.session_state:
-    st.session_state["portfolio_loans"] = []
+    st.session_state["portfolio_loans"] = [{
+        "platform": "Firefish",
+        "amount": 10000.0,
+        "interest": 5.0,
+        "start_date": datetime.date(2025, 4, 25),
+        "term_months": 12,
+        "liquidation_ltv": 100}
+    ]
 
 new_platform = st.text_input("Platform / Lender", key="new_platform")
 new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000)
@@ -198,7 +205,7 @@ for loan in st.session_state.get("portfolio_loans", []):
     else:
         effective_end = today
     days_passed = (effective_end - loan["start_date"]).days
-    interest = loan["amount"] * loan["interest"] * days_passed / 365
+    interest = loan["amount"] * loan["interest"] * days_passed / 365 / 100
     total_debt += loan["amount"] + interest
 
 portfolio_value = total_btc * st.session_state["btc_price"]
@@ -245,7 +252,8 @@ ltv_relative_to_ath_input = st.checkbox(
     key="ltv_relative_to_ath_input"
 )
 
-enable_sell_input = st.checkbox("Enable Sell-Rebalancing", value=preset_config.get("enable_sell", True), key="enable_sell_input")
+enable_sell_input = st.checkbox("Enable Sell-Rebalancing", value=preset_config.get("enable_sell", True),
+                                key="enable_sell_input")
 if enable_sell_input:
     max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv_input / 100 - 0.01), 3)
     rebalance_sell_input = st.slider(
@@ -264,7 +272,8 @@ else:
     rebalance_sell_input = 0
     rebalance_sell_factor_input = 1.0
 
-enable_buy_input = st.checkbox("Enable Buy-Rebalancing", value=preset_config.get("enable_buy", True), key="enable_buy_input")
+enable_buy_input = st.checkbox("Enable Buy-Rebalancing", value=preset_config.get("enable_buy", True),
+                               key="enable_buy_input")
 if enable_buy_input:
     max_buy_threshold = ltv_input - 1
     rebalance_buy_input = st.slider(
@@ -341,7 +350,6 @@ with right_col:
                     except Exception as e:
                         st.error(f"❌ Failed to import presets: {e}")
 
-
 df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
 
@@ -395,7 +403,7 @@ interest_rate = st.number_input(
 
 liquidation_ltv = st.slider(
     "Liquidation LTV (%)", 50, 100,
-    get_state_value("liquidation_ltv", 85),
+    get_state_value("liquidation_ltv", 100),
     key="liquidation_ltv",
     help="If the actual LTV exceeds this value, forced liquidation is triggered."
 ) / 100
@@ -406,10 +414,10 @@ selected_sim_strategy = st.selectbox(
     key="selected_sim_strategy"
 )
 
+
 # ---------- 🔄 Simulation Engine ----------
-def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_value: float):
+def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_value: float, loans: list):
     ltv = config.get("ltv", 0.2) / 100
-    st.markdown(ltv)
     enable_buy = config.get("enable_buy", True)
     rebalance_buy = config.get("rebalance_buy", 100) / 100
     rebalance_buy_factor = config.get("rebalance_buy_factor", 100) / 100
@@ -417,19 +425,75 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     rebalance_sell = config.get("rebalance_sell", 100) / 100
     rebalance_sell_factor = config.get("rebalance_sell_factor", 100) / 100
     fixed_interest = 0.0
-    start_day = df.index[0].date()
     data = []
     rebalancing_log = []
     liquidated = False
-    current_loan = 0
+    active_loans = []
+    for loan in loans:
+        if loan.get("term_months"):
+            end_date = loan["start_date"] + pd.DateOffset(months=loan["term_months"])
+        else:
+            end_date = None
+        active_loans.append({
+            **loan,
+            "end_date": end_date,
+            "paid": False,
+            "accrued_interest": 0.0
+        })
 
+    total_debt = 0.0
+    sim_start_date = price_df.index[0].date()
+
+    for loan in active_loans:
+        if loan.get("end_date") and loan["end_date"].date() < sim_start_date:
+            continue
+
+        if loan["start_date"] < sim_start_date:
+            days_running = (sim_start_date - loan["start_date"]).days
+            accrued = loan["amount"] * loan["interest"] * days_running / 365 / 100
+            loan["accrued_interest"] += accrued
+            total_debt += loan["amount"] + accrued
+        else:
+            total_debt += loan["amount"]
+
+    st.markdown(total_debt)
     for i, date in enumerate(price_df.index):
-        days_passed = (date.date() - start_day).days
         price = df.loc[date, 'price']
 
-        accrued_interest = current_loan * interest_rate * days_passed / 365
-        total_debt = current_loan + fixed_interest + accrued_interest
+        for loan in active_loans:
+            if loan["paid"] or not loan["end_date"]:
+                continue
+            if pd.Timestamp(date.date()) >= loan["end_date"]:
+                repayment_amount = loan["amount"] + loan["accrued_interest"]
+                btc_to_sell = repayment_amount / price
+                current_btc -= btc_to_sell
+                loan["paid"] = True
+                action = f"Repay: {loan['platform']}"
+                rebalancing_log.append({
+                    "Date": date.date(),
+                    "Action": action,
+                    "BTC Δ": f"-{btc_to_sell:.6f} BTC",
+                    "Price": f"{price:.2f} {currency_symbol}",
+                    f"{currency_symbol} Spent": f'{- repayment_amount:.2f} {currency_symbol}',
+                    "New Total BTC": f"{current_btc:.6f} BTC",
+                    "New Total Debt": f"{(total_debt - repayment_amount):.2f} `{currency_symbol}`",
+                    "LTV before": real_ltv,
+                    "LTV after": real_ltv
+                })
+                total_debt -= repayment_amount
 
+        accrued_interest = 0.0
+
+        for loan in active_loans:
+            if loan["paid"]:
+                continue
+
+            daily_interest = loan["amount"] * loan["interest"] / 365 / 100
+            loan["accrued_interest"] += daily_interest
+            accrued_interest += daily_interest
+            total_debt += daily_interest
+
+        fixed_interest += accrued_interest
         real_collateral = current_btc * price
         real_ltv = total_debt / real_collateral if real_collateral > 0 else float('inf')
 
@@ -450,8 +514,6 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
             if real_ltv > liquidation_ltv:
                 delta_btc = -current_btc
                 current_btc = 0.0
-                fixed_interest += accrued_interest
-                start_day = date.date()
                 action = "Liquidation"
                 liquidated = True
                 rebalanced = True
@@ -466,10 +528,26 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                     btc_to_sell = max(0, btc_to_sell)
 
                     if btc_to_sell > 0:
+                        usd_available = btc_to_sell * reference_value
+
+                        sorted_loans = sorted(
+                            [loan for loan in active_loans if not loan["paid"]],
+                            key=lambda l: (
+                                -l["interest"], l["term_months"] if l.get("term_months") is not None else float('inf'))
+                        )
+
+                        for loan in sorted_loans:
+                            if usd_available <= 0:
+                                break
+                            outstanding = loan["amount"] + loan["accrued_interest"]
+                            repay_amount = min(usd_available, outstanding)
+                            usd_available -= repay_amount
+                            loan["amount"] -= repay_amount
+                            if loan["amount"] <= 0.01:
+                                loan["paid"] = True
+
                         current_btc -= btc_to_sell
-                        current_loan -= btc_to_sell * P
-                        fixed_interest += accrued_interest
-                        start_day = date.date()
+                        total_debt -= (btc_to_sell * reference_value - usd_available)
                         rebalanced = True
                         action = "Sell"
                         delta_btc = -btc_to_sell
@@ -480,17 +558,25 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                     new_credit = max(0, new_credit)
                     btc_to_buy = new_credit / reference_value
                     if btc_to_buy > 0:
+                        new_loan = {
+                            "platform": "Simulated",
+                            "amount": new_credit,
+                            "interest": interest_rate,
+                            "start_date": date.date(),
+                            "term_months": None,
+                            "liquidation_ltv": liquidation_ltv,
+                            "paid": False,
+                            "accrued_interest": 0.0,
+                            "end_date": None
+                        }
+                        active_loans.append(new_loan)
                         current_btc += btc_to_buy
-                        current_loan += new_credit
-                        fixed_interest += accrued_interest
-                        start_day = date.date()
+                        total_debt += new_credit
                         rebalanced = True
                         action = "Buy"
                         delta_btc = btc_to_buy
 
         if rebalanced:
-            accrued_interest = current_loan * interest_rate * (date.date() - start_day).days / 365
-            total_debt = current_loan + fixed_interest + accrued_interest
             ltv_after = total_debt / (current_btc * reference_value) if current_btc > 0 else float('inf')
 
             rebalancing_log.append({
@@ -522,9 +608,11 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     results["Net BTC"] = results["BTC"] - (results["Total Debt"] / results["Price"])
     return results, rebalancing_log
 
+
 selected_strategy_cfg = strategy_presets[selected_sim_strategy]
 
-results, rebalancing_log = run_simulation(selected_strategy_cfg, total_btc, df, btc_ath)
+results, rebalancing_log = run_simulation(selected_strategy_cfg, total_btc, df, btc_ath,
+                                          st.session_state["portfolio_loans"])
 
 target_ltv = selected_strategy_cfg.get("ltv", 20) / 100
 # ---------- 📉 LTV Chart ----------
@@ -585,6 +673,7 @@ if "Action" in rebal_df.columns:
     buy_mask = rebal_df["Action"] == "Buy"
     sell_mask = rebal_df["Action"] == "Sell"
     liq_mask = rebal_df["Action"] == "Liquidation"
+    repay_mask = rebal_df["Action"].str.startswith("Repay")
 
     fig.add_trace(go.Scatter(
         x=rebal_df[buy_mask]["Date"],
@@ -623,6 +712,15 @@ if "Action" in rebal_df.columns:
             for _, row in rebal_df[liq_mask].iterrows()
         ],
         hoverinfo='text'
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=rebal_df[repay_mask]["Date"],
+        y=rebal_df[repay_mask]["LTV before"],
+        mode='markers',
+        name="Repay",
+        marker=dict(size=12, symbol='diamond', color='blue'),
+        hovertext=[...]  # auch hier passende Texte
     ))
 
 fig.update_layout(
@@ -715,7 +813,7 @@ for strat_name in selected_strategies:
     btc_bought = safe_loan / btc_price
     total_btc = btc_owned + btc_bought
 
-    results, _ = run_simulation(strat_cfg, total_btc, df, btc_ath)
+    results, _ = run_simulation(strat_cfg, total_btc, df, btc_ath, st.session_state["portfolio_loans"])
 
     net_btc = results["Net BTC"].copy()
     net_worth = results["Net Worth"].copy()
