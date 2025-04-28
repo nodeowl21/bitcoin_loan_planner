@@ -110,6 +110,7 @@ if "strategy_presets" not in st.session_state:
             "enable_sell": True,
         }
     }
+    st.session_state["default_strategy"] = "Custom"
 
 live_price = get_live_btc_price()
 default_price = live_price if live_price else 50000
@@ -129,10 +130,36 @@ btc_price_input = st.number_input(
     step=1000
 )
 
+income_per_year_input = st.number_input(
+    f"Annual Income ({currency_symbol})",
+    value=get_state_value("income_per_year", 0.0),
+    step=1000.0,
+    format="%.2f"
+)
+
+btc_saving_rate_input = st.slider(
+    "BTC Saving Rate (% of Income)",
+    min_value=0.0,
+    max_value=100.0,
+    value=get_state_value("btc_saving_rate_percent", 0.0),
+    step=0.5,
+    format="%.1f"
+)
+
+other_assets_input = st.number_input(
+    f"Other Assets ({currency_symbol})",
+    value=get_state_value("other_assets", 0.0),
+    step=1000.0,
+    format="%.2f"
+)
+
 if st.button("📝 Save Portfolio"):
     st.session_state["btc_owned"] = btc_owned_input
     st.session_state["currency"] = currency_input
     st.session_state["btc_price"] = btc_price_input
+    st.session_state["income_per_year"] = income_per_year_input
+    st.session_state["btc_saving_rate_percent"] = btc_saving_rate_input
+    st.session_state["other_assets"] = other_assets_input
     st.session_state["portfolio_saved"] = True
 
 st.subheader("Existing Loans")
@@ -141,7 +168,7 @@ if "portfolio_loans" not in st.session_state:
     st.session_state["portfolio_loans"] = [{
         "platform": "Firefish",
         "amount": 10000.0,
-        "interest": 5.0,
+        "interest": 0.05,
         "start_date": datetime.date(2025, 4, 25),
         "term_months": 12,
         "liquidation_ltv": 100}
@@ -150,7 +177,14 @@ if "portfolio_loans" not in st.session_state:
 new_platform = st.text_input("Platform / Lender", key="new_platform")
 new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000)
 new_interest = st.number_input("Interest Rate (% p.a.)", min_value=0.0, max_value=50.0, value=5.0, key="new_interest",
-                               step=0.1)
+                               step=0.1) / 100
+new_btc_bought = st.number_input(
+    "BTC Bought",
+    min_value=0.0,
+    step=0.0001,
+    format="%.6f",
+    key="new_btc_bought"
+)
 new_start = st.date_input("Start Date", value=datetime.date.today(), key="new_start")
 term_mode = st.selectbox("Loan Term", ["Unlimited", "Set duration"])
 if term_mode == "Set duration":
@@ -169,7 +203,9 @@ if st.button("➕ Add Loan"):
         "interest": new_interest,
         "start_date": new_start,
         "term_months": new_term,
-        "liquidation_ltv": new_liquidation_ltv}
+        "liquidation_ltv": new_liquidation_ltv,
+        "btc_bought": new_btc_bought
+    }
     st.session_state["portfolio_loans"].append(new_loan)
 
 if st.session_state["portfolio_loans"]:
@@ -191,7 +227,11 @@ if st.session_state["portfolio_loans"]:
                 st.session_state["portfolio_loans"].pop(i)
                 st.rerun()
 btc_owned = st.session_state["btc_owned"]
-total_btc = st.session_state["btc_owned"]
+
+# Alle bestehenden BTC aus Loans addieren
+btc_from_loans = sum(loan.get("btc_bought", 0.0) for loan in st.session_state.get("portfolio_loans", []))
+
+total_btc = btc_owned + btc_from_loans
 btc_price = st.session_state["btc_price"]
 total_loan = 0
 total_debt = 0
@@ -205,23 +245,33 @@ for loan in st.session_state.get("portfolio_loans", []):
     else:
         effective_end = today
     days_passed = (effective_end - loan["start_date"]).days
-    interest = loan["amount"] * loan["interest"] * days_passed / 365 / 100
+    interest = loan["amount"] * loan["interest"] * days_passed / 365
     total_debt += loan["amount"] + interest
 
 portfolio_value = total_btc * st.session_state["btc_price"]
 ltv = total_debt / portfolio_value if portfolio_value > 0 else float("inf")
 
+income_per_year = st.session_state.get("income_per_year", 0.0)
+btc_saving_rate_percent = st.session_state.get("btc_saving_rate_percent", 0.0)
+other_assets = st.session_state.get("other_assets", 0.0)
+
 st.sidebar.metric("📈 Total BTC", f"{total_btc:.6f}")
 st.sidebar.metric("💵 Total Debt", f"{currency_symbol}{total_debt:,.2f}")
 st.sidebar.metric("📊 LTV", f"{ltv:.2%}")
+st.sidebar.metric("💼 Annual Income", f"{currency_symbol}{income_per_year:,.2f}")
+st.sidebar.metric("🏦 Other Assets", f"{currency_symbol}{other_assets:,.2f}")
+st.sidebar.metric("💰 BTC Saving Rate", f"{btc_saving_rate_percent:.1f}%")
 
 st.subheader("Strategies")
 
 strategy_presets = st.session_state["strategy_presets"]
 
+preset_list = list(strategy_presets.keys())
+
 selected_preset = st.selectbox(
     "Choose Preset",
-    list(strategy_presets.keys()),
+    options=preset_list,
+    index=preset_list.index(st.session_state.get("default_strategy", "Custom")),
     key="preset_name"
 )
 
@@ -299,6 +349,14 @@ strategy_name_input = st.text_input(
     placeholder="Preset name"
 )
 
+set_default_checkbox = st.checkbox(
+    "Default Strategy",
+    value=(st.session_state.get("default_strategy") == st.session_state.get("preset_name")),
+    help="Mark this strategy as the default for future selections."
+)
+
+if set_default_checkbox:
+    st.session_state["default_strategy"] = st.session_state.get("preset_name")
 left_col, right_col = st.columns([1, 1])
 
 with left_col:
@@ -392,6 +450,11 @@ interval = st.selectbox(
 
 rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[interval]
 
+enable_btc_saving = st.checkbox(
+    "Enable BTC Saving (daily)",
+    value=True
+)
+
 interest_rate = st.number_input(
     "Loan Interest Rate (% p.a.)",
     min_value=0.0,
@@ -410,7 +473,8 @@ liquidation_ltv = st.slider(
 
 selected_sim_strategy = st.selectbox(
     "Choose strategy for simulation:",
-    list(strategy_presets.keys()),
+    options=preset_list,
+    index=preset_list.index(st.session_state.get("default_strategy", "Custom")),
     key="selected_sim_strategy"
 )
 
@@ -450,15 +514,27 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
 
         if loan["start_date"] < sim_start_date:
             days_running = (sim_start_date - loan["start_date"]).days
-            accrued = loan["amount"] * loan["interest"] * days_running / 365 / 100
+            accrued = loan["amount"] * loan["interest"] * days_running / 365
             loan["accrued_interest"] += accrued
             total_debt += loan["amount"] + accrued
         else:
             total_debt += loan["amount"]
 
-    st.markdown(total_debt)
     for i, date in enumerate(price_df.index):
         price = df.loc[date, 'price']
+
+        currency_symbol = "$" if st.session_state.get("currency", "USD") == "USD" else "€"
+
+        if enable_btc_saving:
+            btc_saving_rate_percent = st.session_state.get("btc_saving_rate_percent", 0.0)
+            income_per_year = st.session_state.get("income_per_year", 0.0)
+
+            daily_income = income_per_year / 365
+            daily_saving_fiat = (btc_saving_rate_percent / 100) * daily_income
+
+            if daily_saving_fiat > 0 and price > 0:
+                daily_btc_bought = daily_saving_fiat / price
+                current_btc += daily_btc_bought
 
         for loan in active_loans:
             if loan["paid"] or not loan["end_date"]:
@@ -488,7 +564,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
             if loan["paid"]:
                 continue
 
-            daily_interest = loan["amount"] * loan["interest"] / 365 / 100
+            daily_interest = loan["amount"] * loan["interest"] / 365
             loan["accrued_interest"] += daily_interest
             accrued_interest += daily_interest
             total_debt += daily_interest
@@ -794,7 +870,7 @@ st.header("📊 Strategy Comparison")
 selected_strategies = st.multiselect(
     "Select strategies to compare:",
     options=list(strategy_presets.keys()),
-    default=["Custom"]
+    default=[st.session_state.get("default_strategy", "Custom")]
 )
 
 comparison_data = []
