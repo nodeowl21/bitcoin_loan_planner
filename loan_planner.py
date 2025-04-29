@@ -137,21 +137,6 @@ def import_user_data(uploaded_file):
 if "upload_key" not in st.session_state:
     st.session_state["upload_key"] = str(uuid.uuid4())
 
-with st.sidebar.expander("Import"):
-    import_file = st.file_uploader(
-        "Import Settings",
-        type="json",
-        key=st.session_state["upload_key"]
-    )
-
-    if import_file:
-        try:
-            import_user_data(import_file)
-
-            st.session_state["upload_key"] = str(uuid.uuid4())  # generate a new key!
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ Import failed: {e}")
 
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
@@ -1082,7 +1067,22 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-with st.sidebar.expander("Export"):
+with st.sidebar.expander("Import/Export"):
+    import_file = st.file_uploader(
+        "Import Settings",
+        type="json",
+        key=st.session_state["upload_key"]
+    )
+
+    if import_file:
+        try:
+            import_user_data(import_file)
+
+            st.session_state["upload_key"] = str(uuid.uuid4())  # generate a new key!
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Import failed: {e}")
+
     st.download_button(
         label="⬇️ Export Settings",
         data=json.dumps(export_user_data(), indent=2),
