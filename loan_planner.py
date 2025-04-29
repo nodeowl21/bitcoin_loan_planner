@@ -19,9 +19,8 @@ def get_state_value(key, default):
 
 
 # ---------- Fetch Live Price ----------
-def get_live_btc_price():
+def get_live_btc_price(currency):
     try:
-        currency = st.session_state.get("currency", "EUR").lower()
         url = f"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies={currency}"
         response = requests.get(url, timeout=5)
         data = response.json()
@@ -73,28 +72,28 @@ def export_user_data():
 
     data = {
         "portfolio": {
-            "btc_owned": st.session_state.get("btc_owned"),
-            "btc_price": st.session_state.get("btc_price"),
-            "currency": st.session_state.get("currency"),
-            "income_per_year": st.session_state.get("income_per_year"),
-            "btc_saving_rate_percent": st.session_state.get("btc_saving_rate_percent"),
-            "other_assets": st.session_state.get("other_assets"),
+            "btc_owned": st.session_state.get("btc_owned", 1.0),
+            "btc_price": st.session_state.get("btc_price", 100000.0),
+            "currency": st.session_state.get("currency", "USD"),
+            "income_per_year": st.session_state.get("income_per_year", 0.0),
+            "btc_saving_rate_percent": st.session_state.get("btc_saving_rate_percent", 0.0),
+            "other_assets": st.session_state.get("other_assets", 0.0),
         },
         "loans": loans_serialized,
         "strategies": {
-            "presets": st.session_state.get("strategy_presets"),
-            "default": st.session_state.get("default_strategy"),
+            "presets": st.session_state.get("strategy_presets", {}),
+            "default": st.session_state.get("default_strategy", "Custom"),
         },
         "simulation": {
-            "sim_mode": st.session_state.get("sim_mode"),
-            "sim_years": st.session_state.get("sim_years"),
-            "exp_return": st.session_state.get("exp_return"),
-            "volatility": st.session_state.get("volatility"),
-            "interval": st.session_state.get("interval"),
-            "interest": st.session_state.get("interest"),
-            "liquidation_ltv": st.session_state.get("liquidation_ltv"),
-            "selected_sim_strategy": st.session_state.get("selected_sim_strategy"),
-            "enable_btc_saving": st.session_state.get("enable_btc_saving"),
+            "sim_mode": st.session_state.get("sim_mode", "Historical"),
+            "sim_years": st.session_state.get("sim_years", 5),
+            "exp_return": st.session_state.get("exp_return", 0.0),
+            "volatility": st.session_state.get("volatility", 0.00),
+            "interval": st.session_state.get("interval", "Weekly"),
+            "interest": st.session_state.get("interest", 0.125),
+            "liquidation_ltv": st.session_state.get("liquidation_ltv", 1.0),
+            "selected_sim_strategy": st.session_state.get("selected_sim_strategy", "Custom"),
+            "enable_btc_saving": st.session_state.get("enable_btc_saving", True),
         }
     }
     return data
@@ -190,21 +189,34 @@ if "strategy_presets" not in st.session_state:
     }
     st.session_state["default_strategy"] = "Custom"
 
-live_price = get_live_btc_price()
-default_price = live_price if live_price else 50000
-
 st.sidebar.markdown("## 📂 Portfolio Summary")
 
 st.subheader("Portfolio")
 
+live_price = get_live_btc_price("USD")
+
 btc_owned_input = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), step=0.1)
-currency_input = st.selectbox("Currency", options=["EUR", "USD"],
-                              index=["EUR", "USD"].index(get_state_value("currency", "EUR")))
+prev_currency = st.session_state.get("prev_currency", get_state_value("currency", "USD"))
+
+currency_input = st.selectbox(
+    "Currency",
+    options=["EUR", "USD"],
+    index=["EUR", "USD"].index(get_state_value("currency", "USD"))
+)
+
+currency_changed = currency_input != prev_currency
+
+if currency_changed:
+    live_price = get_live_btc_price(currency_input)
+    if live_price:
+        st.session_state["btc_price"] = live_price
+    st.session_state["prev_currency"] = currency_input
+
 currency_symbol = "$" if currency_input == "USD" else "€"
 
 btc_price_input = st.number_input(
     f"BTC Price ({currency_symbol})",
-    value=get_state_value("btc_price", default_price),
+    value=get_state_value("btc_price", 100000),
     step=1000
 )
 
@@ -284,22 +296,23 @@ if st.session_state["portfolio_loans"]:
     for i, loan in enumerate(st.session_state["portfolio_loans"]):
         cols = st.columns([1, 0.1])
         with cols[0]:
+            start_date = loan["start_date"]
             if loan.get("term_months"):
-                end_date = loan["start_date"] + pd.DateOffset(months=loan["term_months"])
-                duration_str = f"{loan['term_months']} months (ends {end_date.date()})"
+                end_date = start_date + pd.DateOffset(months=loan["term_months"])
+                duration_str = f"{loan['term_months']} months (from {start_date} to {end_date.date()})"
             else:
-                duration_str = "Unlimited"
+                duration_str = f"Unlimited (since {start_date})"
 
             st.markdown(
-                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest']}% p.a. — {duration_str}"
+                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest'] * 100:.2f}% p.a. — {duration_str}"
             )
         with cols[1]:
             if st.button("🗑️", key=f"delete_loan_{i}"):
                 st.session_state["portfolio_loans"].pop(i)
                 st.rerun()
+
 btc_owned = st.session_state["btc_owned"]
 
-# Alle bestehenden BTC aus Loans addieren
 btc_from_loans = sum(loan.get("btc_bought", 0.0) for loan in st.session_state.get("portfolio_loans", []))
 
 total_btc = btc_owned + btc_from_loans
@@ -328,7 +341,6 @@ other_assets = st.session_state.get("other_assets", 0.0)
 total_assets = portfolio_value + other_assets
 net_assets = portfolio_value + other_assets - total_debt
 btc_exposure = portfolio_value / total_assets if total_assets > 0 else 0
-
 
 st.sidebar.metric("Total BTC", f"{total_btc:.6f}")
 st.sidebar.metric("Total Debt", f"{currency_symbol}{total_debt:,.2f}")
@@ -464,7 +476,7 @@ with left_col:
 with right_col:
     with col_save_delete[1]:
         if strategy_name_input not in ["Custom"]:
-            if st.button("🗑️ Delete Preset"):
+            if st.button("🗑️ Delete Strategy"):
                 del st.session_state["strategy_presets"][strategy_name_input]
                 st.session_state["preset_to_select"] = "Custom"
                 st.session_state["last_preset"] = None
