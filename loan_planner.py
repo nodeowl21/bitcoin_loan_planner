@@ -98,6 +98,7 @@ def export_user_data():
     }
     return data
 
+
 def import_user_data(uploaded_file):
     try:
         imported_data = json.load(uploaded_file)
@@ -187,7 +188,6 @@ if "strategy_presets" not in st.session_state:
         }
     }
     st.session_state["default_strategy"] = "Custom"
-
 
 st.sidebar.markdown("## 📂 Portfolio Summary")
 
@@ -296,22 +296,23 @@ if st.session_state["portfolio_loans"]:
     for i, loan in enumerate(st.session_state["portfolio_loans"]):
         cols = st.columns([1, 0.1])
         with cols[0]:
+            start_date = loan["start_date"]
             if loan.get("term_months"):
-                end_date = loan["start_date"] + pd.DateOffset(months=loan["term_months"])
-                duration_str = f"{loan['term_months']} months (ends {end_date.date()})"
+                end_date = start_date + pd.DateOffset(months=loan["term_months"])
+                duration_str = f"{loan['term_months']} months (from {start_date} to {end_date.date()})"
             else:
-                duration_str = "Unlimited"
+                duration_str = f"Unlimited (since {start_date})"
 
             st.markdown(
-                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest']}% p.a. — {duration_str}"
+                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest'] * 100:.2f}% p.a. — {duration_str}"
             )
         with cols[1]:
             if st.button("🗑️", key=f"delete_loan_{i}"):
                 st.session_state["portfolio_loans"].pop(i)
                 st.rerun()
+
 btc_owned = st.session_state["btc_owned"]
 
-# Alle bestehenden BTC aus Loans addieren
 btc_from_loans = sum(loan.get("btc_bought", 0.0) for loan in st.session_state.get("portfolio_loans", []))
 
 total_btc = btc_owned + btc_from_loans
@@ -340,7 +341,6 @@ other_assets = st.session_state.get("other_assets", 0.0)
 total_assets = portfolio_value + other_assets
 net_assets = portfolio_value + other_assets - total_debt
 btc_exposure = portfolio_value / total_assets if total_assets > 0 else 0
-
 
 st.sidebar.metric("Total BTC", f"{total_btc:.6f}")
 st.sidebar.metric("Total Debt", f"{currency_symbol}{total_debt:,.2f}")
