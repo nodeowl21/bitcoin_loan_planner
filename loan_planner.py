@@ -488,6 +488,8 @@ df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
 
 # ---------- 📈 Simulation ----------
+st.header("📈 Simulation & Rebalancing")
+
 sim_mode_input = st.radio(
     "Choose Price Source",
     ["Historical", "Generated"],
