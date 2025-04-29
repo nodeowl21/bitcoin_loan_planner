@@ -137,7 +137,6 @@ def import_user_data(uploaded_file):
 if "upload_key" not in st.session_state:
     st.session_state["upload_key"] = str(uuid.uuid4())
 
-
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
 The core idea: BTC is purchased using borrowed capital, and added to the collateral securing the loan.
@@ -232,7 +231,7 @@ other_assets_input = st.number_input(
     format="%.2f"
 )
 
-if st.button("📝 Save Portfolio"):
+if st.button("Save Portfolio"):
     st.session_state["btc_owned"] = btc_owned_input
     st.session_state["currency"] = currency_input
     st.session_state["btc_price"] = btc_price_input
@@ -244,14 +243,7 @@ if st.button("📝 Save Portfolio"):
 st.subheader("Existing Loans")
 
 if "portfolio_loans" not in st.session_state:
-    st.session_state["portfolio_loans"] = [{
-        "platform": "Firefish",
-        "amount": 10000.0,
-        "interest": 0.05,
-        "start_date": datetime.date(2025, 4, 25),
-        "term_months": 12,
-        "liquidation_ltv": 100}
-    ]
+    st.session_state["portfolio_loans"] = []
 
 new_platform = st.text_input("Platform / Lender", key="new_platform")
 new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000)
@@ -275,7 +267,7 @@ new_liquidation_ltv = st.slider(
     100,
     key="new_liquidation_ltv",
 ) / 100
-if st.button("➕ Add Loan"):
+if st.button("Add Loan"):
     new_loan = {
         "platform": new_platform,
         "amount": new_amount,
@@ -333,13 +325,22 @@ ltv = total_debt / portfolio_value if portfolio_value > 0 else float("inf")
 income_per_year = st.session_state.get("income_per_year", 0.0)
 btc_saving_rate_percent = st.session_state.get("btc_saving_rate_percent", 0.0)
 other_assets = st.session_state.get("other_assets", 0.0)
+total_assets = portfolio_value + other_assets
+net_assets = portfolio_value + other_assets - total_debt
+btc_exposure = portfolio_value / total_assets if total_assets > 0 else 0
+
 
 st.sidebar.metric("Total BTC", f"{total_btc:.6f}")
 st.sidebar.metric("Total Debt", f"{currency_symbol}{total_debt:,.2f}")
-st.sidebar.metric("LTV", f"{ltv:.2%}")
 st.sidebar.metric("Annual Income", f"{currency_symbol}{income_per_year:,.2f}")
 st.sidebar.metric("Other Assets", f"{currency_symbol}{other_assets:,.2f}")
 st.sidebar.metric("BTC Saving Rate", f"{btc_saving_rate_percent:.1f}%")
+
+st.sidebar.markdown("---")
+st.sidebar.metric("Total Value", f"{currency_symbol}{total_assets:,.2f}")
+st.sidebar.metric("Net Value", f"{currency_symbol}{net_assets:,.2f}")
+st.sidebar.metric("LTV", f"{ltv:.2%}")
+st.sidebar.metric("BTC Exposure", f"{btc_exposure:.2%}")
 
 st.subheader("Strategies")
 
@@ -441,7 +442,7 @@ left_col, right_col = st.columns([1, 1])
 with left_col:
     col_save_delete = st.columns(2)
     with col_save_delete[0]:
-        if st.button("💾 Save Preset"):
+        if st.button("Save Strategy"):
             name = strategy_name_input.strip()
             if name:
                 st.session_state["strategy_presets"][name] = {
@@ -549,7 +550,7 @@ selected_sim_strategy_input = st.selectbox(
     key="selected_sim_strategy_input"
 )
 
-if st.button("🚀 Run Simulation"):
+if st.button("Run Simulation"):
     st.session_state["sim_mode"] = sim_mode_input
     st.session_state["sim_years"] = sim_years_input
     st.session_state["exp_return"] = expected_return_input
@@ -943,16 +944,6 @@ if st.session_state.get("simulation_ready", False):
     net_value_diff = net_value - start_value
     net_btc_diff = net_btc - start_btc
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Total BTC", f"{end_btc:.6f} BTC", f"{btc_diff:+.6f} BTC")
-        st.metric("Net BTC", f"{net_btc:.6f} BTC", f"{net_btc_diff:+.6f} BTC")
-        st.metric("Total Debt (incl. interest)", f"{currency_symbol}{end_total_debt:,.2f}")
-    with col2:
-        st.metric("Total Value", f"{currency_symbol}{end_value:,.2f}", f"{value_diff:+,.2f} {currency_symbol}")
-        st.metric("Net Value", f"{currency_symbol}{net_value:,.2f}", f"{net_value_diff:+,.2f} {currency_symbol}")
-        st.metric("Total Interest Paid", f"{currency_symbol}{total_interest:,.2f}")
-
     max_ltv = results['Real LTV'].max()
     ltv_buffer = (st.session_state["liquidation_ltv"] - max_ltv) / st.session_state["liquidation_ltv"]
 
@@ -963,8 +954,49 @@ if st.session_state.get("simulation_ready", False):
     else:
         liquidation_risk = "🟢 Low"
 
-    st.metric("Liquidation Risk", liquidation_risk)
+    income_per_year = st.session_state.get("income_per_year", 0.0)
+    other_assets = st.session_state.get("other_assets", 0.0)
 
+    epsilon = 1e-6
+
+    if abs(end_total_debt) < epsilon:
+        if income_per_year + other_assets > 0:
+            debt_coverage_ratio = float('inf')
+        else:
+            debt_coverage_ratio = 1
+    else:
+        debt_coverage_ratio = (income_per_year + other_assets) / end_total_debt
+
+    if debt_coverage_ratio == float('inf'):
+        dcr_value_display = "∞"
+    else:
+        dcr_value_display = f"{debt_coverage_ratio:.2f}"
+
+    if debt_coverage_ratio >= 1.5:
+        dcr_status = "🟢 Low Risk"
+    elif 1.0 <= debt_coverage_ratio < 1.5:
+        dcr_status = "🟡 Medium Risk"
+    else:
+        dcr_status = "🔴 High Risk"
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total BTC", f"{end_btc:.6f} BTC", f"{btc_diff:+.6f} BTC")
+        st.metric("Net BTC", f"{net_btc:.6f} BTC", f"{net_btc_diff:+.6f} BTC")
+        st.metric("Total Debt (incl. interest)", f"{currency_symbol}{end_total_debt:,.2f}")
+        st.metric("Liquidation Risk", liquidation_risk)
+    with col2:
+        st.metric("Total Value", f"{currency_symbol}{end_value:,.2f}", f"{value_diff:+,.2f} {currency_symbol}")
+        st.metric("Net Value", f"{currency_symbol}{net_value:,.2f}", f"{net_value_diff:+,.2f} {currency_symbol}")
+        st.metric("Total Interest Paid", f"{currency_symbol}{total_interest:,.2f}")
+        st.metric(
+            label="Debt Coverage Ratio (DCR)",
+            value=dcr_value_display,
+            delta=dcr_status,
+            help="Debt Coverage Ratio (DCR) = (Annual Income + Other Assets) / Total Debt.\n\n"
+                 "Indicates how easily you could cover your outstanding debt with your non-BTC assets and income.\n\n"
+                 "Higher values mean lower risk. A DCR above 1.5 is considered safe, between 1.0 and 1.5 moderate, and below 1.0 risky."
+        )
     st.header("📊 Strategy Comparison")
 
     selected_strategies = st.multiselect(
