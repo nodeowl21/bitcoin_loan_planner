@@ -5,6 +5,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import uuid
 
 st.title("🟠 Bitcoin Loan Planner")
 
@@ -58,6 +59,99 @@ def get_strategy_config() -> dict:
         "ltv_relative_to_ath": st.session_state.get("ltv_relative_to_ath", False),
     }
 
+
+def export_user_data():
+    # Loans vorbereiten: Datum zu String konvertieren
+    loans_serialized = []
+    for loan in st.session_state.get("portfolio_loans", []):
+        serialized_loan = loan.copy()
+        if isinstance(serialized_loan.get("start_date"), datetime.date):
+            serialized_loan["start_date"] = serialized_loan["start_date"].isoformat()
+        if isinstance(serialized_loan.get("end_date"), datetime.date):
+            serialized_loan["end_date"] = serialized_loan["end_date"].isoformat()
+        loans_serialized.append(serialized_loan)
+
+    data = {
+        "portfolio": {
+            "btc_owned": st.session_state.get("btc_owned"),
+            "btc_price": st.session_state.get("btc_price"),
+            "currency": st.session_state.get("currency"),
+            "income_per_year": st.session_state.get("income_per_year"),
+            "btc_saving_rate_percent": st.session_state.get("btc_saving_rate_percent"),
+            "other_assets": st.session_state.get("other_assets"),
+        },
+        "loans": loans_serialized,
+        "strategies": {
+            "presets": st.session_state.get("strategy_presets"),
+            "default": st.session_state.get("default_strategy"),
+        },
+        "simulation": {
+            "sim_mode": st.session_state.get("sim_mode"),
+            "sim_years": st.session_state.get("sim_years"),
+            "exp_return": st.session_state.get("exp_return"),
+            "volatility": st.session_state.get("volatility"),
+            "interval": st.session_state.get("interval"),
+            "interest": st.session_state.get("interest"),
+            "liquidation_ltv": st.session_state.get("liquidation_ltv"),
+            "selected_sim_strategy": st.session_state.get("selected_sim_strategy"),
+            "enable_btc_saving": st.session_state.get("enable_btc_saving"),
+        }
+    }
+    return data
+
+
+def import_user_data(uploaded_file):
+    try:
+        imported_data = json.load(uploaded_file)
+
+        for k, v in imported_data.get("portfolio", {}).items():
+            st.session_state[k] = v
+
+        loans = imported_data.get("loans", [])
+        deserialized_loans = []
+        for loan in loans:
+            deserialized_loan = loan.copy()
+            if "start_date" in loan:
+                deserialized_loan["start_date"] = datetime.date.fromisoformat(loan["start_date"])
+            if "end_date" in loan and loan["end_date"] is not None:
+                deserialized_loan["end_date"] = datetime.date.fromisoformat(loan["end_date"])
+            deserialized_loans.append(deserialized_loan)
+        st.session_state["portfolio_loans"] = deserialized_loans
+
+        strategies = imported_data.get("strategies", {})
+        if "presets" in strategies:
+            st.session_state["strategy_presets"] = strategies["presets"]
+        if "default" in strategies:
+            st.session_state["default_strategy"] = strategies["default"]
+
+        # Simulation Settings
+        simulation = imported_data.get("simulation", {})
+        for k, v in simulation.items():
+            st.session_state[k] = v
+
+
+    except Exception as e:
+        st.error(f"❌ Failed to import data: {e}")
+
+
+if "upload_key" not in st.session_state:
+    st.session_state["upload_key"] = str(uuid.uuid4())
+
+with st.sidebar.expander("Import"):
+    import_file = st.file_uploader(
+        "Import Settings",
+        type="json",
+        key=st.session_state["upload_key"]
+    )
+
+    if import_file:
+        try:
+            import_user_data(import_file)
+
+            st.session_state["upload_key"] = str(uuid.uuid4())  # generate a new key!
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Import failed: {e}")
 
 st.markdown("""
 This is a **Bitcoin Loan Planner** for simulating credit strategies aimed at accumulating more Bitcoin over time.
@@ -255,12 +349,12 @@ income_per_year = st.session_state.get("income_per_year", 0.0)
 btc_saving_rate_percent = st.session_state.get("btc_saving_rate_percent", 0.0)
 other_assets = st.session_state.get("other_assets", 0.0)
 
-st.sidebar.metric("📈 Total BTC", f"{total_btc:.6f}")
-st.sidebar.metric("💵 Total Debt", f"{currency_symbol}{total_debt:,.2f}")
-st.sidebar.metric("📊 LTV", f"{ltv:.2%}")
-st.sidebar.metric("💼 Annual Income", f"{currency_symbol}{income_per_year:,.2f}")
-st.sidebar.metric("🏦 Other Assets", f"{currency_symbol}{other_assets:,.2f}")
-st.sidebar.metric("💰 BTC Saving Rate", f"{btc_saving_rate_percent:.1f}%")
+st.sidebar.metric("Total BTC", f"{total_btc:.6f}")
+st.sidebar.metric("Total Debt", f"{currency_symbol}{total_debt:,.2f}")
+st.sidebar.metric("LTV", f"{ltv:.2%}")
+st.sidebar.metric("Annual Income", f"{currency_symbol}{income_per_year:,.2f}")
+st.sidebar.metric("Other Assets", f"{currency_symbol}{other_assets:,.2f}")
+st.sidebar.metric("BTC Saving Rate", f"{btc_saving_rate_percent:.1f}%")
 
 st.subheader("Strategies")
 
@@ -375,9 +469,13 @@ with left_col:
                     "rebalance_buy": rebalance_buy_input,
                     "rebalance_buy_factor": rebalance_buy_factor_input
                 }
+                if set_default_checkbox:
+                    st.session_state["default_strategy"] = name
                 st.session_state["preset_to_select"] = name
                 st.session_state["last_preset"] = None
                 st.rerun()
+
+with right_col:
     with col_save_delete[1]:
         if strategy_name_input not in ["Custom"]:
             if st.button("🗑️ Delete Preset"):
@@ -385,98 +483,99 @@ with left_col:
                 st.session_state["preset_to_select"] = "Custom"
                 st.session_state["last_preset"] = None
                 st.rerun()
-with right_col:
-    with st.container():
-        col_imp_exp = st.columns(2)
-        with col_imp_exp[0]:
-            export_data = json.dumps(st.session_state["strategy_presets"], indent=2)
-            st.download_button(
-                label="⬇️ Export Presets",
-                data=export_data,
-                file_name="all_presets.json",
-                mime="application/json",
-            )
-        with col_imp_exp[1]:
-            if st.toggle("⬆️ Import Presets", value=False):
-                import_file = st.file_uploader("Upload JSON file", type="json", key="file_uploader")
-                if import_file is not None:
-                    try:
-                        imported_presets = json.load(import_file)
-                        st.session_state["strategy_presets"].update(imported_presets)
-                        del st.session_state["file_uploader"]
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to import presets: {e}")
 
 df_raw = pd.read_csv("btc-usd-max.csv")
 btc_ath = df_raw["price"].max()
 
 # ---------- 📈 Simulation ----------
-st.header("📈 Simulation & Rebalancing")
-
-sim_mode = st.radio(
+sim_mode_input = st.radio(
     "Choose Price Source",
     ["Historical", "Generated"],
-    key="sim_mode",
-    help="Choose between using historical BTC prices or a simulated random walk (based on expected return and volatility)."
+    index=["Historical", "Generated"].index(st.session_state.get("sim_mode", "Historical")),
+    help="Choose between historical or generated prices."
 )
 
-if sim_mode == "Generated":
-    years = st.slider("Number of Simulation Years", 1, 20, get_state_value("sim_years", 5), key="sim_years")
-    expected_return = st.slider("Expected Annual Return (%)", -100, 200,
-                                get_state_value("exp_return", 50), key="exp_return") / 100
-    volatility = st.slider("Daily Volatility (%)", 1, 30,
-                           get_state_value("volatility", 5), key="volatility") / 100
-    df = generate_random_walk(years=years, annual_return=expected_return, daily_volatility=volatility)
+if sim_mode_input == "Generated":
+    sim_years_input = st.slider(
+        "Number of Simulation Years", 1, 20,
+        value=st.session_state.get("sim_years", 5),
+    )
+
+    expected_return_input = st.slider(
+        "Expected Annual Return (%)", -100, 200,
+        value=int(st.session_state.get("exp_return", 50) * 100),
+    ) / 100
+
+    volatility_input = st.slider(
+        "Daily Volatility (%)", 1, 30,
+        value=int(st.session_state.get("volatility", 5) * 100),
+    ) / 100
+
+
 else:
-    num_years = st.slider("Historical Timeframe (years)", 1, 10, get_state_value("sim_years", 5), key="sim_years")
+    sim_years_input = st.slider(
+        "Historical Timeframe (years)", 1, 10,
+        value=st.session_state.get("sim_years", 5),
+    )
+
+    expected_return_input = 0
+    volatility_input = 0
+
     df_raw["snapped_at"] = pd.to_datetime(df_raw["snapped_at"])
     df = df_raw.set_index("snapped_at")["price"].sort_index()
     end_date = df.index.max()
-    start_date = end_date - pd.DateOffset(years=num_years)
+    start_date = end_date - pd.DateOffset(years=sim_years_input)
     price_series = df.loc[start_date:end_date]
     price_rel = price_series / price_series.iloc[0]
     simulated_prices = price_rel * btc_price
     future_dates = pd.date_range(start=datetime.date.today(), periods=len(simulated_prices), freq='D')
     df = pd.DataFrame({'price': simulated_prices.values}, index=future_dates)
 
-interval = st.selectbox(
+interval_input = st.selectbox(
     "Rebalancing Interval",
     ["Daily", "Weekly", "Monthly", "Yearly"],
-    index=["Daily", "Weekly", "Monthly", "Yearly"].index(get_state_value("interval", "Weekly")),
-    key="interval",
-    help="How often rebalancing is evaluated and potentially executed."
+    index=["Daily", "Weekly", "Monthly", "Yearly"].index(st.session_state.get("interval", "Weekly")),
 )
 
-rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[interval]
-
-enable_btc_saving = st.checkbox(
-    "Enable BTC Saving (daily)",
-    value=True
-)
-
-interest_rate = st.number_input(
+interest_input = st.number_input(
     "Loan Interest Rate (% p.a.)",
     min_value=0.0,
     max_value=20.0,
-    value=get_state_value("interest", 12.5),
-    step=0.1,
-    key="interest"
+    value=st.session_state.get("interest", 12.5),
 ) / 100
 
-liquidation_ltv = st.slider(
+liquidation_ltv_input = st.slider(
     "Liquidation LTV (%)", 50, 100,
-    get_state_value("liquidation_ltv", 100),
-    key="liquidation_ltv",
-    help="If the actual LTV exceeds this value, forced liquidation is triggered."
+    value=int(st.session_state.get("liquidation_ltv", 100) * 100),
 ) / 100
 
-selected_sim_strategy = st.selectbox(
-    "Choose strategy for simulation:",
-    options=preset_list,
-    index=preset_list.index(st.session_state.get("default_strategy", "Custom")),
-    key="selected_sim_strategy"
+enable_btc_saving_input = st.checkbox(
+    "Enable BTC Saving (daily)",
+    value=st.session_state.get("enable_btc_saving", True),
 )
+
+selected_sim_strategy_input = st.selectbox(
+    "Choose strategy for simulation:",
+    options=list(st.session_state["strategy_presets"].keys()),
+    index=list(st.session_state["strategy_presets"].keys()).index(
+        st.session_state.get("selected_sim_strategy", "Custom")),
+    key="selected_sim_strategy_input"
+)
+
+if st.button("🚀 Run Simulation"):
+    st.session_state["sim_mode"] = sim_mode_input
+    st.session_state["sim_years"] = sim_years_input
+    st.session_state["exp_return"] = expected_return_input
+    st.session_state["volatility"] = volatility_input
+    st.session_state["interval"] = interval_input
+    st.session_state["interest_rate"] = interest_input
+    st.session_state["liquidation_ltv"] = liquidation_ltv_input
+    st.session_state["enable_btc_saving"] = enable_btc_saving_input
+    st.session_state["selected_sim_strategy"] = selected_sim_strategy_input
+
+    st.session_state["simulation_ready"] = True
+
+    st.rerun()
 
 
 # ---------- 🔄 Simulation Engine ----------
@@ -488,6 +587,8 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     enable_sell = config.get("enable_sell", True)
     rebalance_sell = config.get("rebalance_sell", 100) / 100
     rebalance_sell_factor = config.get("rebalance_sell_factor", 100) / 100
+    rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[
+        st.session_state.get("interval", "Weekly")]
     fixed_interest = 0.0
     data = []
     rebalancing_log = []
@@ -525,7 +626,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
 
         currency_symbol = "$" if st.session_state.get("currency", "USD") == "USD" else "€"
 
-        if enable_btc_saving:
+        if st.session_state["enable_btc_saving"]:
             btc_saving_rate_percent = st.session_state.get("btc_saving_rate_percent", 0.0)
             income_per_year = st.session_state.get("income_per_year", 0.0)
 
@@ -552,7 +653,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                     "Price": f"{price:.2f} {currency_symbol}",
                     f"{currency_symbol} Spent": f'{- repayment_amount:.2f} {currency_symbol}',
                     "New Total BTC": f"{current_btc:.6f} BTC",
-                    "New Total Debt": f"{(total_debt - repayment_amount):.2f} `{currency_symbol}`",
+                    "New Total Debt": f"{(total_debt - repayment_amount):.2f} {currency_symbol}",
                     "LTV before": real_ltv,
                     "LTV after": real_ltv
                 })
@@ -587,7 +688,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
         delta_btc = 0.0
 
         if not liquidated:
-            if real_ltv > liquidation_ltv:
+            if real_ltv > st.session_state["liquidation_ltv"]:
                 delta_btc = -current_btc
                 current_btc = 0.0
                 action = "Liquidation"
@@ -637,10 +738,10 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                         new_loan = {
                             "platform": "Simulated",
                             "amount": new_credit,
-                            "interest": interest_rate,
+                            "interest": st.session_state["interest_rate"],
                             "start_date": date.date(),
                             "term_months": None,
-                            "liquidation_ltv": liquidation_ltv,
+                            "liquidation_ltv": st.session_state["liquidation_ltv"],
                             "paid": False,
                             "accrued_interest": 0.0,
                             "end_date": None
@@ -664,7 +765,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                 "Price": f'{price:.2f} {currency_symbol}',
                 f"{currency_symbol} Spent": f'{delta_btc * price:.2f} {currency_symbol}',
                 "New Total BTC": f'{current_btc:.6f} BTC',
-                "New Total Debt": f'{total_debt:.2f} `{currency_symbol}`'
+                "New Total Debt": f'{total_debt:.2f} {currency_symbol}'
             })
 
         data.append({
@@ -685,259 +786,272 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     return results, rebalancing_log
 
 
-selected_strategy_cfg = strategy_presets[selected_sim_strategy]
+if st.session_state.get("simulation_ready", False):
 
-results, rebalancing_log = run_simulation(selected_strategy_cfg, total_btc, df, btc_ath,
-                                          st.session_state["portfolio_loans"])
+    selected_strategy_cfg = strategy_presets[st.session_state["selected_sim_strategy"]]
 
-target_ltv = selected_strategy_cfg.get("ltv", 20) / 100
-# ---------- 📉 LTV Chart ----------
-st.subheader("📉 LTV Development")
+    results, rebalancing_log = run_simulation(
+        selected_strategy_cfg,
+        total_btc,
+        df,
+        btc_ath,
+        st.session_state["portfolio_loans"]
+    )
 
-fig = go.Figure()
-ltv_line_name = "LTV relative to ATH" if selected_strategy_cfg.get("ltv_relative_to_ath", False) else "LTV"
-fig.add_trace(go.Scatter(
-    x=results.index,
-    y=results['LTV'],
-    mode='lines',
-    name=ltv_line_name,
-    hovertemplate="Date: %{x|%Y-%m-%d}<br>LTV: %{y:,.2f}"
-))
+    selected_strategy_cfg = strategy_presets[st.session_state["selected_sim_strategy"]]
 
-if selected_strategy_cfg.get("ltv_relative_to_ath", False):
+    results, rebalancing_log = run_simulation(selected_strategy_cfg, total_btc, df, btc_ath,
+                                              st.session_state["portfolio_loans"])
+
+    target_ltv = selected_strategy_cfg.get("ltv", 20) / 100
+    # ---------- 📉 LTV Chart ----------
+    st.subheader("📉 LTV Development")
+
+    fig = go.Figure()
+    ltv_line_name = "LTV relative to ATH" if selected_strategy_cfg.get("ltv_relative_to_ath", False) else "LTV"
     fig.add_trace(go.Scatter(
         x=results.index,
-        y=results['Real LTV'],
+        y=results['LTV'],
         mode='lines',
-        name='Real LTV',
+        name=ltv_line_name,
+        hovertemplate="Date: %{x|%Y-%m-%d}<br>LTV: %{y:,.2f}"
+    ))
+
+    if selected_strategy_cfg.get("ltv_relative_to_ath", False):
+        fig.add_trace(go.Scatter(
+            x=results.index,
+            y=results['Real LTV'],
+            mode='lines',
+            name='Real LTV',
+            line=dict(dash='dash'),
+            hovertemplate="Date: %{x|%Y-%m-%d}<br>Real LTV: %{y:.2%}"
+        ))
+    fig.add_trace(go.Scatter(
+        x=results.index,
+        y=[target_ltv] * len(results),
+        mode='lines',
+        name='Target LTV',
         line=dict(dash='dash'),
-        hovertemplate="Date: %{x|%Y-%m-%d}<br>Real LTV: %{y:.2%}"
+        hoverinfo='skip'
     ))
-fig.add_trace(go.Scatter(
-    x=results.index,
-    y=[target_ltv] * len(results),
-    mode='lines',
-    name='Target LTV',
-    line=dict(dash='dash'),
-    hoverinfo='skip'
-))
-fig.add_trace(go.Scatter(
-    x=results.index,
-    y=results['Price'],
-    mode='lines',
-    name='BTC Price',
-    yaxis='y2',
-    line=dict(color='orange'),
-    customdata=np.stack((
-        results["BTC"],
-        results["Total Debt"],
-        results["Net Worth"],
-        results["Net BTC"]
-    ), axis=-1),
-    hovertemplate=
-    "Date: %{x|%Y-%m-%d}<br>" +
-    "BTC Price: {currency_symbol}%{y:,.2f}<br>" +
-    "BTC Holdings: %{customdata[0]:.6f} BTC<br>" +
-    "Total Debt: {currency_symbol}%{customdata[1]:,.2f}<br>" +
-    "Net Worth: {currency_symbol}%{customdata[2]:,.2f}<br>" +
-    "Net BTC: %{customdata[3]:.6f} BTC"
-))
-
-rebal_df = pd.DataFrame(rebalancing_log)
-
-if "Action" in rebal_df.columns:
-    buy_mask = rebal_df["Action"] == "Buy"
-    sell_mask = rebal_df["Action"] == "Sell"
-    liq_mask = rebal_df["Action"] == "Liquidation"
-    repay_mask = rebal_df["Action"].str.startswith("Repay")
-
     fig.add_trace(go.Scatter(
-        x=rebal_df[buy_mask]["Date"],
-        y=rebal_df[buy_mask]["LTV before"],
-        mode='markers',
-        name="Buy",
-        marker=dict(size=12, symbol='circle', color='green'),
-        hovertext=[
-            f"Buy on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
-            for _, row in rebal_df[buy_mask].iterrows()
-        ],
-        hoverinfo='text'
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=rebal_df[sell_mask]["Date"],
-        y=rebal_df[sell_mask]["LTV before"],
-        mode='markers',
-        name="Sell",
-        marker=dict(size=12, symbol='circle', color='gold'),
-        hovertext=[
-            f"Sell on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
-            for _, row in rebal_df[sell_mask].iterrows()
-        ],
-        hoverinfo='text'
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=rebal_df[liq_mask]["Date"],
-        y=rebal_df[liq_mask]["LTV before"],
-        mode='markers',
-        name="Liquidation",
-        marker=dict(size=12, symbol='x', color='red'),
-        hovertext=[
-            f"Liquidation on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
-            for _, row in rebal_df[liq_mask].iterrows()
-        ],
-        hoverinfo='text'
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=rebal_df[repay_mask]["Date"],
-        y=rebal_df[repay_mask]["LTV before"],
-        mode='markers',
-        name="Repay",
-        marker=dict(size=12, symbol='diamond', color='blue'),
-        hovertext=[...]  # auch hier passende Texte
-    ))
-
-fig.update_layout(
-    yaxis=dict(title='LTV'),
-    yaxis2=dict(title=f'BTC Price ({currency_symbol})', overlaying='y', side='right'),
-    title='LTV & BTC Price with Rebalancing Events',
-    legend=dict(orientation="h", y=-0.2)
-)
-
-st.plotly_chart(fig, use_container_width=True)
-
-# ---------- 📘 Rebalancing Log ----------
-if not rebal_df.empty:
-    st.subheader("📘 Rebalancing Log")
-    st.dataframe(pd.DataFrame(rebalancing_log))
-
-st.markdown("## ✅ Loan Plan Summary")
-
-liquidated = False
-if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
-    last_liq = rebal_df[rebal_df["Action"] == "Liquidation"].iloc[-1]
-    end_price = float(str(last_liq["Price"]).replace("`{currency_symbol}`", "").replace(",", ""))
-    end_total_debt = float(str(last_liq["New Total Debt"]).replace("`{currency_symbol}`", "").replace(",", ""))
-    original_btc = float(str(last_liq["BTC Δ"]).replace(" BTC", "").replace("+", "").replace(",", "").lstrip("-"))
-    liquidation_value = original_btc * end_price
-    remaining_value = max(liquidation_value - end_total_debt, 0)
-    net_btc = remaining_value / end_price
-    end_btc = net_btc
-    liquidated = True
-else:
-    end_price = df.iloc[-1]["price"]
-    end_total_debt = results["Total Debt"].iloc[-1]
-    end_btc = results["BTC"].iloc[-1]
-    net_btc = results["Net BTC"].iloc[-1]
-
-total_interest = results["Total Interest"].iloc[-1]
-start_price = df.iloc[0]["price"]
-start_btc = btc_owned
-start_value = start_btc * start_price
-end_value = end_btc * end_price
-value_diff = end_value - start_value
-btc_diff = end_btc - start_btc
-net_value = net_btc * end_price
-net_value_diff = net_value - start_value
-net_btc_diff = net_btc - start_btc
-
-col1, col2 = st.columns(2)
-with col1:
-    st.metric("Total BTC", f"{end_btc:.6f} BTC", f"{btc_diff:+.6f} BTC")
-    st.metric("Net BTC", f"{net_btc:.6f} BTC", f"{net_btc_diff:+.6f} BTC")
-    st.metric("Total Debt (incl. interest)", f"{currency_symbol}{end_total_debt:,.2f}")
-with col2:
-    st.metric("Total Value", f"{currency_symbol}{end_value:,.2f}", f"{value_diff:+,.2f} {currency_symbol}")
-    st.metric("Net Value", f"{currency_symbol}{net_value:,.2f}", f"{net_value_diff:+,.2f} {currency_symbol}")
-    st.metric("Total Interest Paid", f"{currency_symbol}{total_interest:,.2f}")
-
-max_ltv = results['Real LTV'].max()
-ltv_buffer = (liquidation_ltv - max_ltv) / liquidation_ltv
-
-if liquidated:
-    liquidation_risk = "❌ High"
-elif ltv_buffer < 0.20:
-    liquidation_risk = "⚠️ Medium"
-else:
-    liquidation_risk = "🟢 Low"
-
-st.metric("Liquidation Risk", liquidation_risk)
-
-st.header("📊 Strategy Comparison")
-
-selected_strategies = st.multiselect(
-    "Select strategies to compare:",
-    options=list(strategy_presets.keys()),
-    default=[st.session_state.get("default_strategy", "Custom")]
-)
-
-comparison_data = []
-
-for strat_name in selected_strategies:
-    strat_cfg = strategy_presets[strat_name]
-    strat_label = strat_name
-
-    btc_owned = strat_cfg.get("btc_owned", st.session_state.get("btc_owned", 1.0))
-    btc_price = strat_cfg.get("btc_price", st.session_state.get("btc_price", 50000))
-    ltv = strat_cfg.get("ltv", st.session_state.get("ltv", 0.20)) / 100
-    ltv_relative_to_ath = strat_cfg.get("ltv_relative_to_ath", st.session_state.get("ltv_relative_to_ath", False))
-
-    initial_ltv = ltv * (btc_ath / btc_price) if ltv_relative_to_ath else ltv
-    safe_loan = (initial_ltv * btc_owned * btc_price) / (1 - initial_ltv)
-    btc_bought = safe_loan / btc_price
-    total_btc = btc_owned + btc_bought
-
-    results, _ = run_simulation(strat_cfg, total_btc, df, btc_ath, st.session_state["portfolio_loans"])
-
-    net_btc = results["Net BTC"].copy()
-    net_worth = results["Net Worth"].copy()
-    net_worth[net_worth < 0] = 0
-
-    comparison_data.append({
-        "name": strat_name,
-        "dates": results.index,
-        "net_worth": net_worth,
-        "net_btc": net_btc,
-        "ltv_series": results["LTV"].copy()
-    })
-
-comparison_view = st.radio(
-    "View Mode",
-    options=["Net Worth", "LTV"],
-    horizontal=True
-)
-fig_compare = go.Figure()
-for strat in comparison_data:
-    y_data = strat["net_worth"] if comparison_view == "Net Worth" else strat["ltv_series"]
-
-    fig_compare.add_trace(go.Scatter(
-        x=strat["dates"],
-        y=y_data,
+        x=results.index,
+        y=results['Price'],
         mode='lines',
-        name=strat["name"],
-        hovertemplate=(
-            "Date: %{x|%Y-%m-%d}<br>"
-            "Net Value: {currency_symbol}%{customdata[0]:,.2f}<br>"
-            "Net BTC: %{customdata[1]:.6f}<br>"
-            "LTV: %{customdata[2]:.2%}"
-        ),
+        name='BTC Price',
+        yaxis='y2',
+        line=dict(color='orange'),
         customdata=np.stack((
-            strat["net_worth"],
-            strat["net_btc"],
-            strat["ltv_series"]
-        ), axis=-1)
+            results["BTC"],
+            results["Total Debt"],
+            results["Net Worth"],
+            results["Net BTC"]
+        ), axis=-1),
+        hovertemplate=
+        "Date: %{x|%Y-%m-%d}<br>" +
+        f"BTC Price: {currency_symbol}%{{y:,.2f}}<br>" +
+        "BTC Holdings: %{customdata[0]:.6f} BTC<br>" +
+        f"Total Debt: {currency_symbol}%{{customdata[1]:,.2f}}<br>" +
+        f"Net Worth: {currency_symbol}%{{customdata[2]:,.2f}}<br>" +
+        "Net BTC: %{customdata[3]:.6f} BTC"
     ))
 
-fig_compare.update_layout(
-    title=f"📊 Strategy Comparison – {comparison_view}",
-    xaxis_title="Date",
-    yaxis_title=comparison_view,
-    legend=dict(orientation="h", y=-0.2)
-)
+    rebal_df = pd.DataFrame(rebalancing_log)
 
-st.plotly_chart(fig_compare, use_container_width=True)
+    if "Action" in rebal_df.columns:
+        buy_mask = rebal_df["Action"] == "Buy"
+        sell_mask = rebal_df["Action"] == "Sell"
+        liq_mask = rebal_df["Action"] == "Liquidation"
+        repay_mask = rebal_df["Action"].str.startswith("Repay")
+
+        fig.add_trace(go.Scatter(
+            x=rebal_df[buy_mask]["Date"],
+            y=rebal_df[buy_mask]["LTV before"],
+            mode='markers',
+            name="Buy",
+            marker=dict(size=12, symbol='circle', color='green'),
+            hovertext=[
+                f"Buy on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+                for _, row in rebal_df[buy_mask].iterrows()
+            ],
+            hoverinfo='text'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=rebal_df[sell_mask]["Date"],
+            y=rebal_df[sell_mask]["LTV before"],
+            mode='markers',
+            name="Sell",
+            marker=dict(size=12, symbol='circle', color='gold'),
+            hovertext=[
+                f"Sell on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+                for _, row in rebal_df[sell_mask].iterrows()
+            ],
+            hoverinfo='text'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=rebal_df[liq_mask]["Date"],
+            y=rebal_df[liq_mask]["LTV before"],
+            mode='markers',
+            name="Liquidation",
+            marker=dict(size=12, symbol='x', color='red'),
+            hovertext=[
+                f"Liquidation on {row['Date']}<br>BTC Δ: {row['BTC Δ']}<br>Total Debt: {row['New Total Debt']}<br>Price: {row['Price']}<br>LTV: {row['LTV before']}"
+                for _, row in rebal_df[liq_mask].iterrows()
+            ],
+            hoverinfo='text'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=rebal_df[repay_mask]["Date"],
+            y=rebal_df[repay_mask]["LTV before"],
+            mode='markers',
+            name="Repay",
+            marker=dict(size=12, symbol='diamond', color='blue'),
+            hovertext=[...]  # auch hier passende Texte
+        ))
+
+    fig.update_layout(
+        yaxis=dict(title='LTV'),
+        yaxis2=dict(title=f'BTC Price ({currency_symbol})', overlaying='y', side='right'),
+        title='LTV & BTC Price with Rebalancing Events',
+        legend=dict(orientation="h", y=-0.2)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ---------- 📘 Rebalancing Log ----------
+    if not rebal_df.empty:
+        st.subheader("📘 Rebalancing Log")
+        st.dataframe(pd.DataFrame(rebalancing_log))
+
+    st.markdown("## ✅ Loan Plan Summary")
+
+    liquidated = False
+    if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
+        last_liq = rebal_df[rebal_df["Action"] == "Liquidation"].iloc[-1]
+        end_price = float(str(last_liq["Price"]).replace("{currency_symbol}", "").replace(",", ""))
+        end_total_debt = float(str(last_liq["New Total Debt"]).replace("{currency_symbol}", "").replace(",", ""))
+        original_btc = float(str(last_liq["BTC Δ"]).replace(" BTC", "").replace("+", "").replace(",", "").lstrip("-"))
+        liquidation_value = original_btc * end_price
+        remaining_value = max(liquidation_value - end_total_debt, 0)
+        net_btc = remaining_value / end_price
+        end_btc = net_btc
+        liquidated = True
+    else:
+        end_price = df.iloc[-1]["price"]
+        end_total_debt = results["Total Debt"].iloc[-1]
+        end_btc = results["BTC"].iloc[-1]
+        net_btc = results["Net BTC"].iloc[-1]
+
+    total_interest = results["Total Interest"].iloc[-1]
+    start_price = df.iloc[0]["price"]
+    start_btc = btc_owned
+    start_value = start_btc * start_price
+    end_value = end_btc * end_price
+    value_diff = end_value - start_value
+    btc_diff = end_btc - start_btc
+    net_value = net_btc * end_price
+    net_value_diff = net_value - start_value
+    net_btc_diff = net_btc - start_btc
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Total BTC", f"{end_btc:.6f} BTC", f"{btc_diff:+.6f} BTC")
+        st.metric("Net BTC", f"{net_btc:.6f} BTC", f"{net_btc_diff:+.6f} BTC")
+        st.metric("Total Debt (incl. interest)", f"{currency_symbol}{end_total_debt:,.2f}")
+    with col2:
+        st.metric("Total Value", f"{currency_symbol}{end_value:,.2f}", f"{value_diff:+,.2f} {currency_symbol}")
+        st.metric("Net Value", f"{currency_symbol}{net_value:,.2f}", f"{net_value_diff:+,.2f} {currency_symbol}")
+        st.metric("Total Interest Paid", f"{currency_symbol}{total_interest:,.2f}")
+
+    max_ltv = results['Real LTV'].max()
+    ltv_buffer = (st.session_state["liquidation_ltv"] - max_ltv) / st.session_state["liquidation_ltv"]
+
+    if liquidated:
+        liquidation_risk = "❌ High"
+    elif ltv_buffer < 0.20:
+        liquidation_risk = "⚠️ Medium"
+    else:
+        liquidation_risk = "🟢 Low"
+
+    st.metric("Liquidation Risk", liquidation_risk)
+
+    st.header("📊 Strategy Comparison")
+
+    selected_strategies = st.multiselect(
+        "Select strategies to compare:",
+        options=list(strategy_presets.keys()),
+        default=[st.session_state.get("default_strategy", "Custom")]
+    )
+
+    comparison_data = []
+
+    for strat_name in selected_strategies:
+        strat_cfg = strategy_presets[strat_name]
+        strat_label = strat_name
+
+        btc_owned = strat_cfg.get("btc_owned", st.session_state.get("btc_owned", 1.0))
+        btc_price = strat_cfg.get("btc_price", st.session_state.get("btc_price", 50000))
+        ltv = strat_cfg.get("ltv", st.session_state.get("ltv", 0.20)) / 100
+        ltv_relative_to_ath = strat_cfg.get("ltv_relative_to_ath", st.session_state.get("ltv_relative_to_ath", False))
+
+        initial_ltv = ltv * (btc_ath / btc_price) if ltv_relative_to_ath else ltv
+        safe_loan = (initial_ltv * btc_owned * btc_price) / (1 - initial_ltv)
+        btc_bought = safe_loan / btc_price
+        total_btc = btc_owned + btc_bought
+
+        results, _ = run_simulation(strat_cfg, total_btc, df, btc_ath, st.session_state["portfolio_loans"])
+
+        net_btc = results["Net BTC"].copy()
+        net_worth = results["Net Worth"].copy()
+        net_worth[net_worth < 0] = 0
+
+        comparison_data.append({
+            "name": strat_name,
+            "dates": results.index,
+            "net_worth": net_worth,
+            "net_btc": net_btc,
+            "ltv_series": results["LTV"].copy()
+        })
+
+    comparison_view = st.radio(
+        "View Mode",
+        options=["Net Worth", "LTV"],
+        horizontal=True
+    )
+
+    fig_compare = go.Figure()
+    for strat in comparison_data:
+        y_data = strat["net_worth"] if comparison_view == "Net Worth" else strat["ltv_series"]
+
+        fig_compare.add_trace(go.Scatter(
+            x=strat["dates"],
+            y=y_data,
+            mode='lines',
+            name=strat["name"],
+            hovertemplate=(
+                "Date: %{x|%Y-%m-%d}<br>"
+                f"Net Value: {currency_symbol}%{{customdata[0]:,.2f}}<br>"
+                "Net BTC: %{customdata[1]:.6f}<br>"
+                "LTV: %{customdata[2]:.2%}"
+            ),
+            customdata=np.stack((
+                strat["net_worth"],
+                strat["net_btc"],
+                strat["ltv_series"]
+            ), axis=-1)
+        ))
+
+    fig_compare.update_layout(
+        title=f"📊 Strategy Comparison – {comparison_view}",
+        xaxis_title="Date",
+        yaxis_title=comparison_view,
+        legend=dict(orientation="h", y=-0.2)
+    )
+
+    st.plotly_chart(fig_compare, use_container_width=True)
 
 st.markdown("## ⚠️ Disclaimers & Assumptions")
 st.markdown("""
@@ -965,3 +1079,11 @@ st.markdown("""
   </small>
 </div>
 """, unsafe_allow_html=True)
+
+with st.sidebar.expander("Export"):
+    st.download_button(
+        label="⬇️ Export Settings",
+        data=json.dumps(export_user_data(), indent=2),
+        file_name="loan_planner_backup.json",
+        mime="application/json"
+    )
