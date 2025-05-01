@@ -24,7 +24,7 @@ def get_live_btc_price(currency):
         url = f"https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies={currency}"
         response = requests.get(url, timeout=5)
         data = response.json()
-        return data["bitcoin"][currency]
+        return data["bitcoin"][currency.lower()]
     except:
         return None
 
@@ -73,7 +73,6 @@ def export_user_data():
     data = {
         "portfolio": {
             "btc_owned": st.session_state.get("btc_owned", 1.0),
-            "btc_price": st.session_state.get("btc_price", 100000.0),
             "currency": st.session_state.get("currency", "USD"),
             "income_per_year": st.session_state.get("income_per_year", 0.0),
             "btc_saving_rate_percent": st.session_state.get("btc_saving_rate_percent", 0.0),
@@ -196,6 +195,8 @@ st.subheader("Portfolio")
 live_price = get_live_btc_price("USD")
 
 btc_owned_input = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), step=0.1)
+if live_price:
+    st.session_state["btc_price"] = live_price
 prev_currency = st.session_state.get("prev_currency", get_state_value("currency", "USD"))
 
 currency_input = st.selectbox(
