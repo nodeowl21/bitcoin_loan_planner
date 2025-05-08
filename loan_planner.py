@@ -210,19 +210,20 @@ currency_changed = currency_input != prev_currency
 if currency_changed:
     live_price = get_live_btc_price(currency_input)
     if live_price:
-        st.session_state["btc_price"] = live_price
+        st.session_state["temp_btc_price"] = live_price
     st.session_state["prev_currency"] = currency_input
 
-currency_symbol = "$" if currency_input == "USD" else "€"
+temp_currency_symbol = "$" if currency_input == "USD" else "€"
 
+temp_price = st.session_state.get("temp_btc_price")
 btc_price_input = st.number_input(
-    f"BTC Price ({currency_symbol})",
-    value=get_state_value("btc_price", 100000),
+    f"BTC Price ({temp_currency_symbol})",
+    value=temp_price if temp_price else get_state_value("btc_price", 100000),
     step=1000
 )
 
 income_per_year_input = st.number_input(
-    f"Annual Income ({currency_symbol})",
+    f"Annual Income ({temp_currency_symbol})",
     value=get_state_value("income_per_year", 0.0),
     step=1000.0,
     format="%.2f"
@@ -238,7 +239,7 @@ btc_saving_rate_input = st.slider(
 )
 
 other_assets_input = st.number_input(
-    f"Other Assets ({currency_symbol})",
+    f"Other Assets ({temp_currency_symbol})",
     value=get_state_value("other_assets", 0.0),
     step=1000.0,
     format="%.2f"
@@ -253,35 +254,61 @@ if st.button("Save Portfolio"):
     st.session_state["other_assets"] = other_assets_input
     st.session_state["portfolio_saved"] = True
 
+currency_symbol = "$" if get_state_value("currency", "USD") == "USD" else "€"
+
 st.subheader("Existing Loans")
 
 if "portfolio_loans" not in st.session_state:
     st.session_state["portfolio_loans"] = []
 
-new_platform = st.text_input("Platform / Lender", key="new_platform")
-new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000)
-new_interest = st.number_input("Interest Rate (% p.a.)", min_value=0.0, max_value=50.0, value=5.0, key="new_interest",
+editing_loan = next((loan for loan in st.session_state["portfolio_loans"] if loan.get("id") == st.session_state.get("edit_loan_id")), None)
+if editing_loan:
+    new_platform_default = editing_loan.get("platform", "")
+    new_amount_default = editing_loan.get("amount", 0.0)
+    new_interest_default = editing_loan.get("interest", 0.05) * 100  # percent
+    new_btc_bought_default = editing_loan.get("btc_bought", 0.0)
+    new_start_default = editing_loan.get("start_date", datetime.date.today())
+    new_liquidation_ltv_default = editing_loan.get("liquidation_ltv", 1.0) * 100
+    new_term_mode_default = "Set duration" if editing_loan.get("term_months") else "Unlimited"
+    new_term_default = editing_loan.get("term_months", 12)
+else:
+    new_platform_default = st.session_state.get("new_platform", "")
+    new_amount_default = st.session_state.get("new_amount", 0.0)
+    new_interest_default = st.session_state.get("new_interest", 5.0)
+    new_btc_bought_default = st.session_state.get("new_btc_bought", 0.0)
+    new_start_default = st.session_state.get("new_start", datetime.date.today())
+    new_liquidation_ltv_default = st.session_state.get("new_liquidation_ltv", 100)
+    new_term_mode_default = st.session_state.get("new_term_mode", "Unlimited")
+    new_term_default = st.session_state.get("new_term", 12)
+
+new_platform = st.text_input("Platform / Lender", key="new_platform", value=new_platform_default)
+new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000.0, value=new_amount_default)
+new_interest = st.number_input("Interest Rate (% p.a.)", min_value=0.0, max_value=50.0, value=new_interest_default, key="new_interest",
                                step=0.1) / 100
 new_btc_bought = st.number_input(
     "BTC Bought",
     min_value=0.0,
     step=0.0001,
     format="%.6f",
-    key="new_btc_bought"
+    key="new_btc_bought",
+    value=new_btc_bought_default
 )
-new_start = st.date_input("Start Date", value=datetime.date.today(), key="new_start")
-term_mode = st.selectbox("Loan Term", ["Unlimited", "Set duration"])
+new_start = st.date_input("Start Date", value=new_start_default, key="new_start")
+term_mode = st.selectbox("Loan Term", ["Unlimited", "Set duration"], index=0 if new_term_mode_default == "Unlimited" else 1)
 if term_mode == "Set duration":
-    new_term = st.number_input("Duration (months)", min_value=1, max_value=360, value=12, key="new_term")
+    new_term = st.number_input("Duration (months)", min_value=1, max_value=360, value=new_term_default, key="new_term")
 else:
     new_term = None
 new_liquidation_ltv = st.slider(
     "Liquidation LTV (%)", 50, 100,
-    100,
+    int(new_liquidation_ltv_default),
     key="new_liquidation_ltv",
 ) / 100
-if st.button("Add Loan"):
+import uuid  
+if st.button("Save Loan"):
+    loan_id = st.session_state.get("edit_loan_id") or str(uuid.uuid4())
     new_loan = {
+        "id": loan_id,
         "platform": new_platform,
         "amount": new_amount,
         "interest": new_interest,
@@ -290,12 +317,21 @@ if st.button("Add Loan"):
         "liquidation_ltv": new_liquidation_ltv,
         "btc_bought": new_btc_bought
     }
-    st.session_state["portfolio_loans"].append(new_loan)
+    existing_ids = [loan.get("id") for loan in st.session_state["portfolio_loans"] if "id" in loan]
+    if new_loan["id"] in existing_ids:
+        st.session_state["portfolio_loans"] = [
+            (new_loan if loan.get("id") == new_loan["id"] else loan)
+            for loan in st.session_state["portfolio_loans"]
+        ]
+    else:
+        st.session_state["portfolio_loans"].append(new_loan)
+    st.session_state.pop("edit_loan_id", None)
+    st. rerun()
 
 if st.session_state["portfolio_loans"]:
     st.markdown("Current Loans")
     for i, loan in enumerate(st.session_state["portfolio_loans"]):
-        cols = st.columns([1, 0.1])
+        cols = st.columns([1, 0.1, 0.1])
         with cols[0]:
             start_date = loan["start_date"]
             if loan.get("term_months"):
@@ -305,9 +341,15 @@ if st.session_state["portfolio_loans"]:
                 duration_str = f"Unlimited (since {start_date})"
 
             st.markdown(
-                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest'] * 100:.2f}% p.a. — {duration_str}"
+                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest'] * 100:.2f}% p.a. — {duration_str}<br>"
+                f"BTC Bought: {loan.get('btc_bought', 0.0):.6f} BTC — Liquidation LTV: {loan.get('liquidation_ltv', 1.0) * 100:.0f}%",
+                unsafe_allow_html=True
             )
         with cols[1]:
+            if st.button("✏️", key=f"edit_loan_{i}"):
+                st.session_state["edit_loan_id"] = loan.get("id")
+                st.rerun()
+        with cols[2]:
             if st.button("🗑️", key=f"delete_loan_{i}"):
                 st.session_state["portfolio_loans"].pop(i)
                 st.rerun()
@@ -344,7 +386,9 @@ net_assets = portfolio_value + other_assets - total_debt
 btc_exposure = portfolio_value / total_assets if total_assets > 0 else 0
 
 st.sidebar.metric("Total BTC", f"{total_btc:.6f}")
+st.sidebar.metric("Total BTC Value", f"{currency_symbol}{portfolio_value:.2f}")
 st.sidebar.metric("Total Debt", f"{currency_symbol}{total_debt:,.2f}")
+st.sidebar.metric("LTV", f"{ltv:.2%}")
 st.sidebar.metric("Annual Income", f"{currency_symbol}{income_per_year:,.2f}")
 st.sidebar.metric("Other Assets", f"{currency_symbol}{other_assets:,.2f}")
 st.sidebar.metric("BTC Saving Rate", f"{btc_saving_rate_percent:.1f}%")
@@ -352,7 +396,6 @@ st.sidebar.metric("BTC Saving Rate", f"{btc_saving_rate_percent:.1f}%")
 st.sidebar.markdown("---")
 st.sidebar.metric("Total Value", f"{currency_symbol}{total_assets:,.2f}")
 st.sidebar.metric("Net Value", f"{currency_symbol}{net_assets:,.2f}")
-st.sidebar.metric("LTV", f"{ltv:.2%}")
 st.sidebar.metric("BTC Exposure", f"{btc_exposure:.2%}")
 
 st.subheader("Strategies")
