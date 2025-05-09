@@ -122,11 +122,9 @@ def import_user_data(uploaded_file):
         if "default" in strategies:
             st.session_state["default_strategy"] = strategies["default"]
 
-        # Simulation Settings
         simulation = imported_data.get("simulation", {})
         for k, v in simulation.items():
             st.session_state[k] = v
-
 
     except Exception as e:
         st.error(f"❌ Failed to import data: {e}")
@@ -192,7 +190,7 @@ st.sidebar.markdown("## 📂 Portfolio Summary")
 
 st.subheader("Portfolio")
 
-live_price = get_live_btc_price("USD")
+live_price = get_live_btc_price(st.session_state.get("currency", "USD"))
 
 btc_owned_input = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), step=0.1)
 if live_price:
