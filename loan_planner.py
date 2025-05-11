@@ -188,14 +188,13 @@ if "strategy_presets" not in st.session_state:
 
 st.sidebar.markdown("## 📂 Portfolio Summary")
 
-st.subheader("Portfolio")
-
 live_price = get_live_btc_price(st.session_state.get("currency", "USD"))
 
-btc_owned_input = st.number_input("BTC Holdings", value=get_state_value("btc_owned", 1.0), step=0.1)
 if live_price:
     st.session_state["btc_price"] = live_price
 prev_currency = st.session_state.get("prev_currency", get_state_value("currency", "USD"))
+
+st.subheader("General")
 
 currency_input = st.selectbox(
     "Currency",
@@ -218,6 +217,18 @@ btc_price_input = st.number_input(
     f"BTC Price ({temp_currency_symbol})",
     value=temp_price if temp_price else get_state_value("btc_price", 100000),
     step=1000
+)
+
+st.session_state["currency"] = currency_input
+st.session_state["btc_price"] = btc_price_input
+
+st.subheader("Portfolio")
+
+btc_owned_input = st.number_input(
+    "BTC Holdings",
+    value=get_state_value("btc_owned", 1.0),
+    step=0.1,
+    format="%.6f"
 )
 
 income_per_year_input = st.number_input(
@@ -245,8 +256,6 @@ other_assets_input = st.number_input(
 
 if st.button("Save Portfolio"):
     st.session_state["btc_owned"] = btc_owned_input
-    st.session_state["currency"] = currency_input
-    st.session_state["btc_price"] = btc_price_input
     st.session_state["income_per_year"] = income_per_year_input
     st.session_state["btc_saving_rate_percent"] = btc_saving_rate_input
     st.session_state["other_assets"] = other_assets_input
@@ -462,7 +471,7 @@ if enable_buy_input:
     max_buy_threshold = ltv_input - 1
     rebalance_buy_input = st.slider(
         "Buy Threshold (%)",
-        1, max_buy_threshold,
+        0, max_buy_threshold,
         int(preset_config.get("rebalance_buy", min(10, max_buy_threshold))),
         key="rebalance_buy_input"
     )
