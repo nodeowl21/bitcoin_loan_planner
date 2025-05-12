@@ -739,7 +739,17 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
         delta_btc = 0.0
 
         if not liquidated:
-            if real_ltv > st.session_state["liquidation_ltv"]:
+            # Calculate weighted average liquidation LTV across all active (not paid) loans
+            unpaid_loans = [loan for loan in active_loans if not loan.get("paid", False)]
+            if unpaid_loans:
+                weighted_liq_ltv = sum(
+                    loan["liquidation_ltv"] * loan["amount"]
+                    for loan in unpaid_loans
+                ) / sum(loan["amount"] for loan in unpaid_loans)
+            else:
+                weighted_liq_ltv = st.session_state["liquidation_ltv"]
+
+            if real_ltv > weighted_liq_ltv:
                 delta_btc = -current_btc
                 current_btc = 0.0
                 action = "Liquidation"
