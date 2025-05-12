@@ -620,7 +620,7 @@ if st.button("Run Simulation"):
     st.session_state["volatility"] = volatility_input
     st.session_state["interval"] = interval_input
     st.session_state["interest_rate"] = interest_input
-    st.session_state["liquidation_ltv"] = liquidation_ltv_input
+    st.session_state["liquidation_ltv"] = liquidation_ltv_input / 100
     st.session_state["enable_btc_saving"] = enable_btc_saving_input
     st.session_state["selected_sim_strategy"] = selected_sim_strategy_input
 
@@ -982,8 +982,8 @@ if st.session_state.get("simulation_ready", False):
     liquidated = False
     if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
         last_liq = rebal_df[rebal_df["Action"] == "Liquidation"].iloc[-1]
-        end_price = float(str(last_liq["Price"]).replace("{currency_symbol}", "").replace(",", ""))
-        end_total_debt = float(str(last_liq["New Total Debt"]).replace("{currency_symbol}", "").replace(",", ""))
+        end_price = float(str(last_liq["Price"]).replace(f"{currency_symbol}", "").replace(",", ""))
+        end_total_debt = float(str(last_liq["New Total Debt"]).replace(f"{currency_symbol}", "").replace(",", ""))
         original_btc = float(str(last_liq["BTC Δ"]).replace(" BTC", "").replace("+", "").replace(",", "").lstrip("-"))
         liquidation_value = original_btc * end_price
         remaining_value = max(liquidation_value - end_total_debt, 0)
