@@ -89,8 +89,8 @@ def export_user_data():
             "exp_return": st.session_state.get("exp_return", 0.0),
             "volatility": st.session_state.get("volatility", 0.00),
             "interval": st.session_state.get("interval", "Weekly"),
-            "interest": st.session_state.get("interest", 0.125),
-            "liquidation_ltv": st.session_state.get("liquidation_ltv", 1.0),
+            "interest": st.session_state.get("interest", 12.5),
+            "liquidation_ltv": st.session_state.get("liquidation_ltv", 100),
             "selected_sim_strategy": st.session_state.get("selected_sim_strategy", "Custom"),
             "enable_btc_saving": st.session_state.get("enable_btc_saving", True),
         }
@@ -268,14 +268,16 @@ st.subheader("Existing Loans")
 if "portfolio_loans" not in st.session_state:
     st.session_state["portfolio_loans"] = []
 
-editing_loan = next((loan for loan in st.session_state["portfolio_loans"] if loan.get("id") == st.session_state.get("edit_loan_id")), None)
+editing_loan = next(
+    (loan for loan in st.session_state["portfolio_loans"] if loan.get("id") == st.session_state.get("edit_loan_id")),
+    None)
 if editing_loan:
     new_platform_default = editing_loan.get("platform", "")
     new_amount_default = editing_loan.get("amount", 0.0)
-    new_interest_default = editing_loan.get("interest", 0.05) * 100  # percent
+    new_interest_default = editing_loan.get("interest", 5.0)
     new_btc_bought_default = editing_loan.get("btc_bought", 0.0)
     new_start_default = editing_loan.get("start_date", datetime.date.today())
-    new_liquidation_ltv_default = editing_loan.get("liquidation_ltv", 1.0) * 100
+    new_liquidation_ltv_default = editing_loan.get("liquidation_ltv", 100)
     new_term_mode_default = "Set duration" if editing_loan.get("term_months") else "Unlimited"
     new_term_default = editing_loan.get("term_months", 12)
 else:
@@ -289,9 +291,11 @@ else:
     new_term_default = st.session_state.get("new_term", 12)
 
 new_platform = st.text_input("Platform / Lender", key="new_platform", value=new_platform_default)
-new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000.0, value=new_amount_default)
-new_interest = st.number_input("Interest Rate (% p.a.)", min_value=0.0, max_value=50.0, value=new_interest_default, key="new_interest",
-                               step=0.1) / 100
+new_amount = st.number_input(f"Loan Amount ({currency_symbol})", key="new_amount", step=1000.0,
+                             value=new_amount_default)
+new_interest = st.number_input(
+    "Interest Rate (% p.a.)", min_value=0.0, max_value=50.0, value=new_interest_default, key="new_interest", step=0.1
+)
 new_btc_bought = st.number_input(
     "BTC Bought",
     min_value=0.0,
@@ -301,7 +305,8 @@ new_btc_bought = st.number_input(
     value=new_btc_bought_default
 )
 new_start = st.date_input("Start Date", value=new_start_default, key="new_start")
-term_mode = st.selectbox("Loan Term", ["Unlimited", "Set duration"], index=0 if new_term_mode_default == "Unlimited" else 1)
+term_mode = st.selectbox("Loan Term", ["Unlimited", "Set duration"],
+                         index=0 if new_term_mode_default == "Unlimited" else 1)
 if term_mode == "Set duration":
     new_term = st.number_input("Duration (months)", min_value=1, max_value=360, value=new_term_default, key="new_term")
 else:
@@ -310,8 +315,9 @@ new_liquidation_ltv = st.slider(
     "Liquidation LTV (%)", 50, 100,
     int(new_liquidation_ltv_default),
     key="new_liquidation_ltv",
-) / 100
-import uuid  
+)
+import uuid
+
 if st.button("Save Loan"):
     loan_id = st.session_state.get("edit_loan_id") or str(uuid.uuid4())
     new_loan = {
@@ -333,7 +339,7 @@ if st.button("Save Loan"):
     else:
         st.session_state["portfolio_loans"].append(new_loan)
     st.session_state.pop("edit_loan_id", None)
-    st. rerun()
+    st.rerun()
 
 if st.session_state["portfolio_loans"]:
     st.markdown("Current Loans")
@@ -348,8 +354,8 @@ if st.session_state["portfolio_loans"]:
                 duration_str = f"Unlimited (since {start_date})"
 
             st.markdown(
-                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest'] * 100:.2f}% p.a. — {duration_str}<br>"
-                f"BTC Bought: {loan.get('btc_bought', 0.0):.6f} BTC — Liquidation LTV: {loan.get('liquidation_ltv', 1.0) * 100:.0f}%",
+                f"**{loan['platform']}** – {currency_symbol}{loan['amount']:,.0f} at {loan['interest']:.2f}% p.a. — {duration_str}<br>"
+                f"BTC Bought: {loan.get('btc_bought', 0.0):.6f} BTC — Liquidation LTV: {loan.get('liquidation_ltv', 100):.0f}%",
                 unsafe_allow_html=True
             )
         with cols[1]:
@@ -379,7 +385,7 @@ for loan in st.session_state.get("portfolio_loans", []):
     else:
         effective_end = today
     days_passed = (effective_end - loan["start_date"]).days
-    interest = loan["amount"] * loan["interest"] * days_passed / 365
+    interest = loan["amount"] * loan["interest"] / 100 * days_passed / 365
     total_debt += loan["amount"] + interest
 
 portfolio_value = total_btc * st.session_state["btc_price"]
@@ -463,7 +469,7 @@ if enable_sell_input:
     )
 else:
     rebalance_sell_input = 0
-    rebalance_sell_factor_input = 1.0
+    rebalance_sell_factor_input = 100
 
 enable_buy_input = st.checkbox("Enable Buy-Rebalancing", value=preset_config.get("enable_buy", True),
                                key="enable_buy_input")
@@ -483,7 +489,7 @@ if enable_buy_input:
     )
 else:
     rebalance_buy_input = 0
-    rebalance_buy_factor_input = 1.0
+    rebalance_buy_factor_input = 100
 
 strategy_name_input = st.text_input(
     label="Name",
@@ -554,13 +560,13 @@ if sim_mode_input == "Generated":
 
     expected_return_input = st.slider(
         "Expected Annual Return (%)", -100, 200,
-        value=int(st.session_state.get("exp_return", 50) * 100),
-    ) / 100
+        value=int(st.session_state.get("exp_return", 50)),
+    )
 
     volatility_input = st.slider(
         "Daily Volatility (%)", 1, 30,
-        value=int(st.session_state.get("volatility", 5) * 100),
-    ) / 100
+        value=int(st.session_state.get("volatility", 5)),
+    )
 
 
 else:
@@ -593,12 +599,12 @@ interest_input = st.number_input(
     min_value=0.0,
     max_value=20.0,
     value=st.session_state.get("interest", 12.5),
-) / 100
+)
 
 liquidation_ltv_input = st.slider(
     "Liquidation LTV (%)", 50, 100,
-    value=int(st.session_state.get("liquidation_ltv", 100) * 100),
-) / 100
+    value=int(st.session_state.get("liquidation_ltv", 100)),
+)
 
 enable_btc_saving_input = st.checkbox(
     "Enable BTC Saving (daily)",
@@ -619,8 +625,8 @@ if st.button("Run Simulation"):
     st.session_state["exp_return"] = expected_return_input
     st.session_state["volatility"] = volatility_input
     st.session_state["interval"] = interval_input
-    st.session_state["interest_rate"] = interest_input
-    st.session_state["liquidation_ltv"] = liquidation_ltv_input / 100
+    st.session_state["interest"] = interest_input
+    st.session_state["liquidation_ltv"] = liquidation_ltv_input
     st.session_state["enable_btc_saving"] = enable_btc_saving_input
     st.session_state["selected_sim_strategy"] = selected_sim_strategy_input
 
@@ -633,10 +639,10 @@ if st.button("Run Simulation"):
 def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_value: float, loans: list):
     ltv = config.get("ltv", 0.2) / 100
     enable_buy = config.get("enable_buy", True)
-    rebalance_buy = config.get("rebalance_buy", 100) / 100
+    rebalance_buy = config.get("rebalance_buy", 10) / 100
     rebalance_buy_factor = config.get("rebalance_buy_factor", 100) / 100
     enable_sell = config.get("enable_sell", True)
-    rebalance_sell = config.get("rebalance_sell", 100) / 100
+    rebalance_sell = config.get("rebalance_sell", 10) / 100
     rebalance_sell_factor = config.get("rebalance_sell_factor", 100) / 100
     rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[
         st.session_state.get("interval", "Weekly")]
@@ -650,8 +656,13 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
             end_date = loan["start_date"] + pd.DateOffset(months=loan["term_months"])
         else:
             end_date = None
+
+        this_liquidation_ltv = loan.get("liquidation_ltv", 100) / 100
+        this_interest = loan.get("interest", 5.0) / 100
         active_loans.append({
             **loan,
+            "liquidation_ltv": this_liquidation_ltv,
+            "interest": this_interest,
             "end_date": end_date,
             "paid": False,
             "accrued_interest": 0.0
@@ -739,7 +750,6 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
         delta_btc = 0.0
 
         if not liquidated:
-            # Calculate weighted average liquidation LTV across all active (not paid) loans
             unpaid_loans = [loan for loan in active_loans if not loan.get("paid", False)]
             if unpaid_loans:
                 weighted_liq_ltv = sum(
@@ -747,7 +757,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                     for loan in unpaid_loans
                 ) / sum(loan["amount"] for loan in unpaid_loans)
             else:
-                weighted_liq_ltv = st.session_state["liquidation_ltv"]
+                weighted_liq_ltv = st.session_state["liquidation_ltv"] / 100
 
             if real_ltv > weighted_liq_ltv:
                 delta_btc = -current_btc
@@ -799,10 +809,10 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                         new_loan = {
                             "platform": "Simulated",
                             "amount": new_credit,
-                            "interest": st.session_state["interest_rate"],
+                            "interest": st.session_state["interest"] / 100,
                             "start_date": date.date(),
                             "term_months": None,
-                            "liquidation_ltv": st.session_state["liquidation_ltv"],
+                            "liquidation_ltv": st.session_state["liquidation_ltv"] / 100,
                             "paid": False,
                             "accrued_interest": 0.0,
                             "end_date": None
@@ -858,11 +868,6 @@ if st.session_state.get("simulation_ready", False):
         btc_ath,
         st.session_state["portfolio_loans"]
     )
-
-    selected_strategy_cfg = strategy_presets[st.session_state["selected_sim_strategy"]]
-
-    results, rebalancing_log = run_simulation(selected_strategy_cfg, total_btc, df, btc_ath,
-                                              st.session_state["portfolio_loans"])
 
     target_ltv = selected_strategy_cfg.get("ltv", 20) / 100
     # ---------- 📉 LTV Chart ----------
@@ -1086,7 +1091,7 @@ if st.session_state.get("simulation_ready", False):
 
         btc_owned = strat_cfg.get("btc_owned", st.session_state.get("btc_owned", 1.0))
         btc_price = strat_cfg.get("btc_price", st.session_state.get("btc_price", 50000))
-        ltv = strat_cfg.get("ltv", st.session_state.get("ltv", 0.20)) / 100
+        ltv = strat_cfg.get("ltv", st.session_state.get("ltv", 20)) / 100
         ltv_relative_to_ath = strat_cfg.get("ltv_relative_to_ath", st.session_state.get("ltv_relative_to_ath", False))
 
         initial_ltv = ltv * (btc_ath / btc_price) if ltv_relative_to_ath else ltv
