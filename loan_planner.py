@@ -564,8 +564,15 @@ if sim_mode_input == "Generated":
     )
 
     volatility_input = st.slider(
-        "Daily Volatility (%)", 1, 30,
+        "Daily Volatility (%)", 1, 100,
         value=int(st.session_state.get("volatility", 5)),
+    )
+
+    df = generate_random_walk(
+        years=sim_years_input,
+        annual_return=expected_return_input / 100,
+        daily_volatility=volatility_input / 100,
+        seed=42
     )
 
 
