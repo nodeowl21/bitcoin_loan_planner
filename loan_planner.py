@@ -1,6 +1,8 @@
 import datetime
 import json
 import numpy as np
+from scipy.optimize import curve_fit
+
 import pandas as pd
 import plotly.graph_objects as go
 import requests
@@ -44,6 +46,34 @@ def generate_random_walk(years=5, annual_return=0.5, daily_volatility=0.05, seed
     start = datetime.date.today()
     dates = pd.date_range(start=start, periods=days + 1)
     return pd.DataFrame({'price': prices}, index=dates)
+
+# ---------- Power Law BTC Price Model ----------
+
+def btc_price_model_power_law(start_year=2025, years=50):
+    # Daten laden
+    df = pd.read_csv("bitcoin_data.csv")
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df[df["Value"] > 0].copy()  # Nur valide Preise
+    df["Days"] = (df["Date"] - pd.Timestamp("2009-01-09")).dt.days
+
+    # Regressionsfunktion: log(price) = a + b * log(days)
+    def log_func(x, a, b):
+        return a + b * np.log(x)
+
+    # Fit berechnen
+    x_data = df["Days"].values
+    y_data = np.log(df["Value"].values)
+    popt, _ = curve_fit(log_func, x_data, y_data)
+    a_fit, b_fit = popt
+
+    # Prognose erstellen
+    start_date = pd.Timestamp(f"{start_year}-01-01")
+    future_dates = pd.date_range(start=start_date, periods=years * 365 + 1, freq="D")
+    x_future = (future_dates - pd.Timestamp("2009-01-09")).days
+    x_future = np.where(x_future > 0, x_future, 1)
+    prices = np.exp(log_func(x_future, a_fit, b_fit))
+
+    return pd.Series(prices, index=future_dates)
 
 
 def get_strategy_config() -> dict:
@@ -547,9 +577,9 @@ st.header("📈 Simulation & Rebalancing")
 
 sim_mode_input = st.radio(
     "Choose Price Source",
-    ["Historical", "Generated"],
-    index=["Historical", "Generated"].index(st.session_state.get("sim_mode", "Historical")),
-    help="Choose between historical or generated prices."
+    ["Historical", "Generated", "Power-Law"],
+    index=["Historical", "Generated", "Power-Law"].index(st.session_state.get("sim_mode", "Historical")),
+    help="Choose between historical, generated, or power-law based prices."
 )
 
 if sim_mode_input == "Generated":
@@ -575,6 +605,19 @@ if sim_mode_input == "Generated":
         seed=42
     )
 
+elif sim_mode_input == "Power-Law":
+    sim_years_input = st.slider(
+        "Number of Simulation Years", 1, 20,
+        value=st.session_state.get("sim_years", 5),
+    )
+    expected_return_input = 0
+    volatility_input = 0
+    df = pd.DataFrame({
+        "price": btc_price_model_power_law(
+            start_year=datetime.date.today().year,
+            years=sim_years_input
+        )
+    })
 
 else:
     sim_years_input = st.slider(
@@ -1107,45 +1150,79 @@ if st.session_state.get("simulation_ready", False):
         total_btc = btc_owned + btc_bought
 
         results, _ = run_simulation(strat_cfg, total_btc, df, btc_ath, st.session_state["portfolio_loans"])
+        sim_df = results
+        if "LTV" in sim_df.columns and (sim_df["LTV"] > 1).any():
+            sim_df = sim_df.loc[:sim_df["LTV"].gt(1).idxmax()]
+        # Nur sim_df verwenden, keine anderen DataFrames (wie results oder df) für Visualisierungsdaten
+        # Sicherheitsprüfung nach dem Abschneiden
+        if sim_df.empty or "Net BTC" not in sim_df.columns or "Net Worth" not in sim_df.columns:
+            continue
 
-        net_btc = results["Net BTC"].copy()
-        net_worth = results["Net Worth"].copy()
+
+        net_btc = sim_df["Net BTC"]
+
+        net_btc_delta_pct = pd.Series(index=sim_df.index, dtype="float64")
+
+        for idx in sim_df.index:
+            if sim_df.loc[idx, "BTC"] > 0:
+                net_btc_delta_pct.loc[idx] = ((net_btc.loc[idx] - btc_owned) / btc_owned)
+            else:
+                net_btc_delta_pct.loc[idx] = -1.0
+
+        net_worth = sim_df["Net Worth"]
+
+        net_worth = net_worth.copy()
         net_worth[net_worth < 0] = 0
 
         comparison_data.append({
             "name": strat_name,
-            "dates": results.index,
+            "dates": sim_df.index,
             "net_worth": net_worth,
             "net_btc": net_btc,
-            "ltv_series": results["LTV"].copy()
+            "ltv_series": sim_df["LTV"].copy(),
+            "net_btc_delta_pct": net_btc_delta_pct
         })
 
     comparison_view = st.radio(
         "View Mode",
-        options=["Net Worth", "LTV"],
+        options=["Net Worth", "LTV", "Net BTC Δ (%)"],
         horizontal=True
     )
 
+    comparison_hovertemplate = {
+        "Net Worth": "Date: %{x|%Y-%m-%d}<br>Net Value: " + currency_symbol + "%{customdata[0]:,.2f}<br>Net BTC: %{customdata[1]:.6f}<br>LTV: %{customdata[2]:.2%}",
+        "LTV": "Date: %{x|%Y-%m-%d}<br>LTV: %{customdata[2]:.2%}<br>Net BTC: %{customdata[1]:.6f}<br>Net Value: " + currency_symbol + "%{customdata[0]:,.2f}",
+        "Net BTC Δ (%)": "Date: %{x|%Y-%m-%d}<br>Net BTC Δ: %{y:.2%}"
+    }
+
     fig_compare = go.Figure()
     for strat in comparison_data:
-        y_data = strat["net_worth"] if comparison_view == "Net Worth" else strat["ltv_series"]
+        # Skip if no data (should not occur, but safety)
+        if len(strat["dates"]) == 0:
+            continue
+        if comparison_view == "Net Worth":
+            y_data = strat["net_worth"]
+        elif comparison_view == "LTV":
+            y_data = strat["ltv_series"]
+        else:
+            y_data = strat["net_btc_delta_pct"]
+
+        if comparison_view in ["Net Worth", "LTV"]:
+            customdata = np.stack((
+                strat["net_worth"],
+                strat["net_btc"],
+                strat["ltv_series"]
+            ), axis=-1)
+        else:
+            customdata = None
 
         fig_compare.add_trace(go.Scatter(
             x=strat["dates"],
             y=y_data,
             mode='lines',
             name=strat["name"],
-            hovertemplate=(
-                "Date: %{x|%Y-%m-%d}<br>"
-                f"Net Value: {currency_symbol}%{{customdata[0]:,.2f}}<br>"
-                "Net BTC: %{customdata[1]:.6f}<br>"
-                "LTV: %{customdata[2]:.2%}"
-            ),
-            customdata=np.stack((
-                strat["net_worth"],
-                strat["net_btc"],
-                strat["ltv_series"]
-            ), axis=-1)
+            hovertemplate=comparison_hovertemplate[comparison_view],
+            customdata=customdata
         ))
 
     fig_compare.update_layout(
@@ -1154,8 +1231,47 @@ if st.session_state.get("simulation_ready", False):
         yaxis_title=comparison_view,
         legend=dict(orientation="h", y=-0.2)
     )
+    # Format Y-axis as percent for Net BTC Δ (%)
+    if comparison_view == "Net BTC Δ (%)":
+        fig_compare.update_yaxes(tickformat=".0%", title="Net BTC Δ")
+
 
     st.plotly_chart(fig_compare, use_container_width=True)
+
+    # ---------- 📋 Strategy Comparison Table (Yearly) ----------
+    st.markdown("### 💹 Total Delta at Year")
+
+    table_data = []
+    for strat in comparison_data:
+        # Skip if no data
+        if len(strat["dates"]) == 0:
+            continue
+        name = strat["name"]
+        sim_df = pd.DataFrame({
+            "Date": strat["dates"],
+            "Net Worth": strat["net_worth"],
+            "Net BTC Δ (%)": strat["net_btc_delta_pct"],
+            "LTV": strat["ltv_series"]
+        })
+        sim_df["Year"] = sim_df["Date"].dt.year
+        df_yearly = sim_df.groupby("Year").last().reset_index()
+        df_yearly["Strategy"] = name
+        table_data.append(df_yearly)
+
+    if table_data:
+        table_df = pd.concat(table_data)
+        table_df = table_df[["Strategy", "Year", "Net Worth", "Net BTC Δ (%)", "LTV"]]
+
+        # Pivot for comparison
+        pivot_df = table_df.pivot(index="Strategy", columns="Year", values="Net BTC Δ (%)")
+        # Fill NAs with 'liq' to indicate liquidation
+        summary_table = pivot_df.fillna("liquidated")
+        # Format as percent with 2 decimals where possible, otherwise keep as 'liq'
+        summary_table = summary_table.applymap(lambda x: f"{x:.2%}" if isinstance(x, float) else x)
+        # Sort by order in selected_strategies
+        summary_table = summary_table.reindex(selected_strategies)
+
+        st.dataframe(summary_table, use_container_width=True)
 
 st.markdown("## ⚠️ Disclaimers & Assumptions")
 st.markdown("""
