@@ -9,6 +9,10 @@ import requests
 import streamlit as st
 import uuid
 
+from skopt import gp_minimize
+from skopt.space import Integer, Categorical
+from skopt.utils import use_named_args
+
 st.title("🟠 Bitcoin Loan Planner")
 
 
@@ -46,6 +50,7 @@ def generate_random_walk(years=5, annual_return=0.5, daily_volatility=0.05, seed
     start = datetime.date.today()
     dates = pd.date_range(start=start, periods=days + 1)
     return pd.DataFrame({'price': prices}, index=dates)
+
 
 # ---------- Power Law BTC Price Model ----------
 
@@ -212,8 +217,7 @@ if "strategy_presets" not in st.session_state:
             "rebalance_sell": 10,
             "enable_buy": False,
             "enable_sell": True,
-        }
-    }
+        }}
     st.session_state["default_strategy"] = "Custom"
 
 st.sidebar.markdown("## 📂 Portfolio Summary")
@@ -669,7 +673,7 @@ selected_sim_strategy_input = st.selectbox(
     key="selected_sim_strategy_input"
 )
 
-if st.button("Run Simulation"):
+def saveSimulationParametersToState():
     st.session_state["sim_mode"] = sim_mode_input
     st.session_state["sim_years"] = sim_years_input
     st.session_state["exp_return"] = expected_return_input
@@ -680,14 +684,27 @@ if st.button("Run Simulation"):
     st.session_state["enable_btc_saving"] = enable_btc_saving_input
     st.session_state["selected_sim_strategy"] = selected_sim_strategy_input
 
+
+if st.button("Run Optimization"):
+    saveSimulationParametersToState()
+
+    st.session_state["simulation_ready"] = False
+    st.session_state["optimization_triggered"] = True
+
+    st.rerun()
+
+if st.button("Run Simulation"):
+    saveSimulationParametersToState()
+
     st.session_state["simulation_ready"] = True
+    st.session_state["optimization_results"] = False
 
     st.rerun()
 
 
 # ---------- 🔄 Simulation Engine ----------
 def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_value: float, loans: list):
-    ltv = config.get("ltv", 0.2) / 100
+    ltv = config.get("ltv", 20) / 100
     enable_buy = config.get("enable_buy", True)
     rebalance_buy = config.get("rebalance_buy", 10) / 100
     rebalance_buy_factor = config.get("rebalance_buy_factor", 100) / 100
@@ -696,6 +713,7 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     rebalance_sell_factor = config.get("rebalance_sell_factor", 100) / 100
     rebalance_days = {"Daily": 1, "Weekly": 7, "Monthly": 30, "Yearly": 365}[
         st.session_state.get("interval", "Weekly")]
+
     fixed_interest = 0.0
     data = []
     rebalancing_log = []
@@ -906,6 +924,123 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     results["Net BTC"] = results["BTC"] - (results["Total Debt"] / results["Price"])
     return results, rebalancing_log
 
+
+param_space = [
+    Integer(1, 45, name="ltv"),
+    Integer(1, 10, name="rebalance_buy"),
+    Integer(50, 100, name="rebalance_buy_factor"),
+    Integer(1, 10, name="rebalance_sell"),
+    Integer(50, 100, name="rebalance_sell_factor"),
+    Categorical([True, False], name="enable_sell"),
+    Categorical([True, False], name="ltv_relative_to_ath")
+]
+
+
+@use_named_args(param_space)
+def simulate_strategy(ltv, rebalance_buy, rebalance_buy_factor, rebalance_sell, rebalance_sell_factor, enable_sell,
+                      ltv_relative_to_ath):
+    strategy_config = {
+        "ltv": ltv,
+        "rebalance_buy": rebalance_buy,
+        "rebalance_buy_factor": rebalance_buy_factor,
+        "rebalance_sell": rebalance_sell,
+        "rebalance_sell_factor": rebalance_sell_factor,
+        "enable_sell": enable_sell,
+        "ltv_relative_to_ath": ltv_relative_to_ath
+    }
+
+    df.index = pd.date_range(
+        start=datetime.date.today(),
+        periods=len(df),
+        freq="D"
+    )
+
+    results, rebalancing_log = run_simulation(
+        strategy_config,
+        btc_owned,
+        df,
+        btc_ath,
+        []
+    )
+
+    rebal_df = pd.DataFrame(rebalancing_log)
+
+    if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
+        net_btc = 0
+    else:
+        net_btc = results["Net BTC"].iloc[-1]
+
+    print(
+        f"Simulated strategy: LTV={ltv}, Buy Threshold={rebalance_buy}, Buy Intensity={rebalance_buy_factor}, Sell Rebalancing={enable_sell}, Sell Threshold={rebalance_sell}, Sell Intensity={rebalance_sell_factor}")
+    print(f"Net BTC: {net_btc:.6f}")
+    return -(net_btc - btc_owned)
+
+if st.session_state.get("optimization_triggered"):
+    with st.spinner("Optimizing..."):
+        result = gp_minimize(
+            simulate_strategy,
+            dimensions=param_space,
+            n_calls=50,
+            random_state=42
+        )
+        best_strategies = sorted(zip(result.func_vals, result.x_iters), key=lambda x: x[0])[:5]
+        keys = [dim.name for dim in param_space]
+        optimization_results = []
+        for i, (score, params) in enumerate(best_strategies, 1):
+            strategy = dict(zip(keys, params))
+            optimization_results.append({"params": strategy, "net_btc_delta": -score})
+        st.session_state["optimization_results"] = optimization_results
+    # Only run once per trigger
+    st.session_state["optimization_triggered"] = False
+
+
+if st.session_state.get("optimization_results"):
+    st.subheader("📈 Optimized Strategies")
+    # Convert optimization results to a list of strategies
+    optimized_strategies = []
+    for res in st.session_state["optimization_results"]:
+        strat = res["params"].copy()
+        # Ensure all relevant fields exist, with sensible defaults
+        strat.setdefault("ltv", 20)
+        strat.setdefault("ltv_relative_to_ath", False)
+        strat.setdefault("enable_buy", True)
+        strat.setdefault("rebalance_buy", 10)
+        strat.setdefault("rebalance_buy_factor", 100)
+        strat.setdefault("enable_sell", True)
+        strat.setdefault("rebalance_sell", 10)
+        strat.setdefault("rebalance_sell_factor", 100)
+        optimized_strategies.append(strat)
+
+    for i, strat in enumerate(optimized_strategies):
+        # Prepare user-friendly mapping
+        mapping = {
+            "Target LTV (%)": strat["ltv"],
+            "Rebalance LTV relative to BTC All-Time-High": strat.get("ltv_relative_to_ath", False),
+            "Enable Buy-Rebalancing": strat.get("enable_buy", False),
+            "Buy Threshold (%)": strat.get("rebalance_buy", 10),
+            "Buy Rebalancing Intensity (%)": strat.get("rebalance_buy_factor", 100),
+            "Enable Sell-Rebalancing": strat.get("enable_sell", False),
+            "Sell Threshold (%)": strat.get("rebalance_sell", 10),
+            "Sell Rebalancing Intensity (%)": strat.get("rebalance_sell_factor", 100),
+        }
+        net_btc_delta = st.session_state["optimization_results"][i].get("net_btc_delta", 0)
+        st.markdown(f"**Optimized #{i + 1} (Net BTC Δ: {net_btc_delta * 100:.2f}%)**")
+        st.json(mapping)
+        if st.button(f"➕ Add 'Optimized #{i + 1}' to Presets", key=f"add_opt_{i}"):
+            if "strategy_presets" not in st.session_state:
+                st.session_state["strategy_presets"] = {}
+            st.session_state["strategy_presets"][f"Optimized #{i + 1}"] = {
+                "ltv": strat["ltv"],
+                "ltv_relative_to_ath": strat.get("ltv_relative_to_ath", False),
+                "enable_buy": strat.get("enable_buy", False),
+                "rebalance_buy": strat.get("rebalance_buy", 10),
+                "rebalance_buy_factor": strat.get("rebalance_buy_factor", 100),
+                "enable_sell": strat.get("enable_sell", False),
+                "rebalance_sell": strat.get("rebalance_sell", 10),
+                "rebalance_sell_factor": strat.get("rebalance_sell_factor", 100),
+            }
+            st.success(f"'Optimized #{i + 1}' added to strategy presets.")
+            st.rerun()
 
 if st.session_state.get("simulation_ready", False):
 
@@ -1158,7 +1293,6 @@ if st.session_state.get("simulation_ready", False):
         if sim_df.empty or "Net BTC" not in sim_df.columns or "Net Worth" not in sim_df.columns:
             continue
 
-
         net_btc = sim_df["Net BTC"]
 
         net_btc_delta_pct = pd.Series(index=sim_df.index, dtype="float64")
@@ -1234,7 +1368,6 @@ if st.session_state.get("simulation_ready", False):
     # Format Y-axis as percent for Net BTC Δ (%)
     if comparison_view == "Net BTC Δ (%)":
         fig_compare.update_yaxes(tickformat=".0%", title="Net BTC Δ")
-
 
     st.plotly_chart(fig_compare, use_container_width=True)
 
