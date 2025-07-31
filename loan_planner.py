@@ -1,17 +1,13 @@
 import datetime
 import json
 import numpy as np
-from scipy.optimize import curve_fit
-
 import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
 import uuid
-
-from skopt import gp_minimize
-from skopt.space import Integer, Categorical
-from skopt.utils import use_named_args
+from scipy.optimize import curve_fit
+from scipy.optimize import differential_evolution
 
 st.title("🟠 Bitcoin Loan Planner")
 
@@ -685,22 +681,44 @@ def saveSimulationParametersToState():
     st.session_state["selected_sim_strategy"] = selected_sim_strategy_input
 
 
-if st.button("Run Optimization"):
-    saveSimulationParametersToState()
+if "optimization_triggered" not in st.session_state:
+    st.session_state["optimization_triggered"] = False
+if "stop_optimization" not in st.session_state:
+    st.session_state["stop_optimization"] = False
 
-    st.session_state["simulation_ready"] = False
-    st.session_state["optimization_triggered"] = True
+left_col, right_col = st.columns([1, 1])
 
-    st.rerun()
+with left_col:
+    col_sim_opt = st.columns(2)
+    with col_sim_opt[0]:
+        if st.button("Run Simulation"):
+            saveSimulationParametersToState()
 
-if st.button("Run Simulation"):
-    saveSimulationParametersToState()
+            st.session_state["simulation_ready"] = True
+            st.session_state["optimization_triggered"] = False
+            st.session_state["stop_optimization"] = False
+            st.session_state["best_strategy_result"] = None
+            st.session_state["optimization_results"] = None
 
-    st.session_state["simulation_ready"] = True
-    st.session_state["optimization_results"] = False
+            st.rerun()
 
-    st.rerun()
+with right_col:
+    with col_sim_opt[1]:
+        if not st.session_state["optimization_triggered"]:
+            if st.button("Run Optimization"):
+                saveSimulationParametersToState()
 
+                st.session_state["simulation_ready"] = False
+                st.session_state["optimization_triggered"] = True
+                st.session_state["stop_optimization"] = False
+
+                st.rerun()
+        else:
+            if st.button("Stop Optimization"):
+                st.session_state["simulation_ready"] = False
+                st.session_state["stop_optimization"] = True
+                st.session_state["optimization_triggered"] = False
+                st.rerun()
 
 # ---------- 🔄 Simulation Engine ----------
 def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_value: float, loans: list):
@@ -925,119 +943,148 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
     return results, rebalancing_log
 
 
-param_space = [
-    Integer(1, 45, name="ltv"),
-    Integer(1, 10, name="rebalance_buy"),
-    Integer(50, 100, name="rebalance_buy_factor"),
-    Integer(1, 10, name="rebalance_sell"),
-    Integer(50, 100, name="rebalance_sell_factor"),
-    Categorical([True, False], name="enable_sell"),
-    Categorical([True, False], name="ltv_relative_to_ath")
-]
+def simulate_strategy_de(params):
+    target_ltv, buy_threshold, buy_intensity, sell_threshold, sell_intensity, ltv_relative_to_ath = params
 
-
-@use_named_args(param_space)
-def simulate_strategy(ltv, rebalance_buy, rebalance_buy_factor, rebalance_sell, rebalance_sell_factor, enable_sell,
-                      ltv_relative_to_ath):
-    strategy_config = {
-        "ltv": ltv,
-        "rebalance_buy": rebalance_buy,
-        "rebalance_buy_factor": rebalance_buy_factor,
-        "rebalance_sell": rebalance_sell,
-        "rebalance_sell_factor": rebalance_sell_factor,
-        "enable_sell": enable_sell,
-        "ltv_relative_to_ath": ltv_relative_to_ath
+    strategy_cfg = {
+        "ltv": int(round(target_ltv)),
+        "ltv_relative_to_ath": ltv_relative_to_ath > 0.5,
+        "enable_buy": buy_threshold > 0,
+        "rebalance_buy": int(round(buy_threshold)),
+        "rebalance_buy_factor": int(round(buy_intensity)),
+        "enable_sell": sell_threshold > 0,
+        "rebalance_sell": int(round(sell_threshold)),
+        "rebalance_sell_factor": int(round(sell_intensity)),
     }
 
-    df.index = pd.date_range(
-        start=datetime.date.today(),
-        periods=len(df),
-        freq="D"
-    )
+    price_df = st.session_state["price_df"].copy() if "price_df" in st.session_state else df.copy()
+    price_df.index = pd.to_datetime(price_df.index)
 
-    results, rebalancing_log = run_simulation(
-        strategy_config,
-        btc_owned,
-        df,
-        btc_ath,
-        []
-    )
+    try:
+        results, rebalancing_log = run_simulation(strategy_cfg, st.session_state["btc_owned"], price_df, btc_ath,
+                                    st.session_state["portfolio_loans"])
+        net_btc_delta = results["Net BTC"].iloc[-1] - st.session_state["btc_owned"]
+        max_ltv = results["Real LTV"].max()
 
-    rebal_df = pd.DataFrame(rebalancing_log)
+        if any(entry.get("Action", "").lower() == "liquidation" for entry in rebalancing_log):
+            net_btc_delta = 0
 
-    if not rebal_df.empty and "Liquidation" in rebal_df["Action"].values:
-        net_btc = 0
-    else:
-        net_btc = results["Net BTC"].iloc[-1]
+        if not any(entry.get("Action", "").lower() == "sell" for entry in rebalancing_log):
+            strategy_cfg["enable_sell"] = False
+            strategy_cfg["rebalance_sell"] = 0
+            strategy_cfg["rebalance_sell_factor"] = 0
 
-    print(
-        f"Simulated strategy: LTV={ltv}, Buy Threshold={rebalance_buy}, Buy Intensity={rebalance_buy_factor}, Sell Rebalancing={enable_sell}, Sell Threshold={rebalance_sell}, Sell Intensity={rebalance_sell_factor}")
-    print(f"Net BTC: {net_btc:.6f}")
-    return -(net_btc - btc_owned)
+        if net_btc_delta > st.session_state["current_best_delta_btc"]:
+            st.session_state["current_best_delta_btc"] = net_btc_delta
+            st.session_state["best_strategy_result"] = {"strategy": strategy_cfg, "net_btc_delta": net_btc_delta}
 
-if st.session_state.get("optimization_triggered"):
-    with st.spinner("Optimizing..."):
-        result = gp_minimize(
-            simulate_strategy,
-            dimensions=param_space,
-            n_calls=50,
-            random_state=42
+            best_strategy_live = {
+                "Target LTV (%)": strategy_cfg["ltv"],
+                "Rebalance LTV relative to BTC All-Time-High": strategy_cfg["ltv_relative_to_ath"],
+                "Enable Buy-Rebalancing": strategy_cfg["enable_buy"],
+                "Buy Threshold (%)": strategy_cfg["rebalance_buy"],
+                "Buy Rebalancing Intensity (%)": strategy_cfg["rebalance_buy_factor"],
+                "Enable Sell-Rebalancing": strategy_cfg["enable_sell"],
+                "Sell Threshold (%)": strategy_cfg["rebalance_sell"],
+                "Sell Rebalancing Intensity (%)": strategy_cfg["rebalance_sell_factor"],
+            }
+
+            progress_placeholder.markdown(f"**Current Best Net BTC Δ: {net_btc_delta :.2%}**")
+            best_strategy_placeholder.json(best_strategy_live)
+
+        return -net_btc_delta
+    except Exception as e:
+        print("Error during simulation:", e)
+        return 1e6
+
+de_bounds = [
+    (5, 50),  # Target LTV
+    (0, 30),  # Buy Threshold
+    (50, 100),  # Buy Intensity
+    (0, 30),  # Sell Threshold
+    (50, 100),  # Sell Intensity
+    (0,1) #ltv_relative_to_ath
+]
+
+if st.session_state.get("optimization_triggered", False):
+    with st.spinner("Optimizing ..."):
+        progress_placeholder = st.empty()
+        best_strategy_placeholder = st.empty()
+
+        def callback_report(xk, convergence):
+            return st.session_state.get("stop_optimization", False)
+
+        st.session_state["current_best_delta_btc"] = - 0.1
+        st.session_state["best_strategy_result"] = None
+        st.session_state["optimization_results"] = None
+
+        result = differential_evolution(
+            simulate_strategy_de,
+            de_bounds,
+            strategy='best1bin',
+            maxiter=30,
+            popsize=15,
+            tol=0.01,
+            seed=42,
+            callback=callback_report
         )
-        best_strategies = sorted(zip(result.func_vals, result.x_iters), key=lambda x: x[0])[:5]
-        keys = [dim.name for dim in param_space]
-        optimization_results = []
-        for i, (score, params) in enumerate(best_strategies, 1):
-            strategy = dict(zip(keys, params))
-            optimization_results.append({"params": strategy, "net_btc_delta": -score})
-        st.session_state["optimization_results"] = optimization_results
-    # Only run once per trigger
-    st.session_state["optimization_triggered"] = False
+        progress_placeholder.empty()
+        best_strategy_placeholder.empty()
+        st.session_state.pop("stop_optimization", None)
 
+        st.session_state["optimization_triggered"] = False
+
+
+if "best_strategy_result" in st.session_state and st.session_state["best_strategy_result"]:
+    st.session_state["optimization_results"] = [
+        {
+            "strategy": st.session_state["best_strategy_result"]["strategy"],
+            "net_btc_delta": st.session_state["best_strategy_result"]["net_btc_delta"]
+        }
+    ]
 
 if st.session_state.get("optimization_results"):
-    st.subheader("📈 Optimized Strategies")
-    # Convert optimization results to a list of strategies
+    st.subheader("📈 Best Strategy")
     optimized_strategies = []
-    for res in st.session_state["optimization_results"]:
-        strat = res["params"].copy()
-        # Ensure all relevant fields exist, with sensible defaults
-        strat.setdefault("ltv", 20)
-        strat.setdefault("ltv_relative_to_ath", False)
-        strat.setdefault("enable_buy", True)
-        strat.setdefault("rebalance_buy", 10)
-        strat.setdefault("rebalance_buy_factor", 100)
-        strat.setdefault("enable_sell", True)
-        strat.setdefault("rebalance_sell", 10)
-        strat.setdefault("rebalance_sell_factor", 100)
-        optimized_strategies.append(strat)
+    for strat in st.session_state["optimization_results"]:
+        strategy = strat.get("strategy", strat)
+        strategy["ltv"] = int(strategy.get("ltv", 20))
+        strategy["ltv_relative_to_ath"] = bool(strategy.get("ltv_relative_to_ath", False))
+        strategy["enable_buy"] = bool(strategy.get("enable_buy", True))
+        strategy["rebalance_buy"] = int(strategy.get("rebalance_buy", 10))
+        strategy["rebalance_buy_factor"] = int(strategy.get("rebalance_buy_factor", 100))
+        strategy["enable_sell"] = bool(strategy.get("enable_sell", True))
+        strategy["rebalance_sell"] = int(strategy.get("rebalance_sell", 10))
+        strategy["rebalance_sell_factor"] = int(strategy.get("rebalance_sell_factor", 100))
+        optimized_strategies.append(strategy)
 
     for i, strat in enumerate(optimized_strategies):
-        # Prepare user-friendly mapping
-        mapping = {
-            "Target LTV (%)": strat["ltv"],
-            "Rebalance LTV relative to BTC All-Time-High": strat.get("ltv_relative_to_ath", False),
-            "Enable Buy-Rebalancing": strat.get("enable_buy", False),
-            "Buy Threshold (%)": strat.get("rebalance_buy", 10),
-            "Buy Rebalancing Intensity (%)": strat.get("rebalance_buy_factor", 100),
-            "Enable Sell-Rebalancing": strat.get("enable_sell", False),
-            "Sell Threshold (%)": strat.get("rebalance_sell", 10),
-            "Sell Rebalancing Intensity (%)": strat.get("rebalance_sell_factor", 100),
+        strategy = strat
+        readable_result = {
+            "Target LTV (%)": int(strategy["ltv"]),
+            "Rebalance LTV relative to BTC All-Time-High": bool(strategy.get("ltv_relative_to_ath", False)),
+            "Enable Buy-Rebalancing": bool(strategy.get("enable_buy", True)),
+            "Buy Threshold (%)": int(strategy.get("rebalance_buy", 10)),
+            "Buy Rebalancing Intensity (%)": int(strategy.get("rebalance_buy_factor", 100)),
+            "Enable Sell-Rebalancing": bool(strategy.get("enable_sell", True)),
+            "Sell Threshold (%)": int(strategy.get("rebalance_sell", 20)),
+            "Sell Rebalancing Intensity (%)": int(strategy.get("rebalance_sell_factor", 100))
         }
         net_btc_delta = st.session_state["optimization_results"][i].get("net_btc_delta", 0)
         st.markdown(f"**Optimized #{i + 1} (Net BTC Δ: {net_btc_delta * 100:.2f}%)**")
-        st.json(mapping)
+        st.json(readable_result)
         if st.button(f"➕ Add 'Optimized #{i + 1}' to Presets", key=f"add_opt_{i}"):
             if "strategy_presets" not in st.session_state:
                 st.session_state["strategy_presets"] = {}
             st.session_state["strategy_presets"][f"Optimized #{i + 1}"] = {
-                "ltv": strat["ltv"],
-                "ltv_relative_to_ath": strat.get("ltv_relative_to_ath", False),
-                "enable_buy": strat.get("enable_buy", False),
-                "rebalance_buy": strat.get("rebalance_buy", 10),
-                "rebalance_buy_factor": strat.get("rebalance_buy_factor", 100),
-                "enable_sell": strat.get("enable_sell", False),
-                "rebalance_sell": strat.get("rebalance_sell", 10),
-                "rebalance_sell_factor": strat.get("rebalance_sell_factor", 100),
+                "ltv": int(strategy["ltv"]),
+                "ltv_relative_to_ath": bool(strategy.get("ltv_relative_to_ath", False)),
+                "enable_buy": bool(strategy.get("enable_buy", True)),
+                "rebalance_buy": int(strategy.get("rebalance_buy", 10)),
+                "rebalance_buy_factor": int(strategy.get("rebalance_buy_factor", 100)),
+                "enable_sell": bool(strategy.get("enable_sell", True)),
+                "rebalance_sell": int(strategy.get("rebalance_sell", 20)),
+                "rebalance_sell_factor": int(strategy.get("rebalance_sell_factor", 100)),
             }
             st.success(f"'Optimized #{i + 1}' added to strategy presets.")
             st.rerun()
