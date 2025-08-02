@@ -346,6 +346,7 @@ new_liquidation_ltv = st.slider(
     int(new_liquidation_ltv_default),
     key="new_liquidation_ltv",
 )
+import uuid
 
 if st.button("Save Loan"):
     loan_id = st.session_state.get("edit_loan_id") or str(uuid.uuid4())
@@ -477,16 +478,12 @@ ltv_input = st.slider(
 ltv_relative_to_ath_input = st.checkbox(
     "Rebalance LTV relative to BTC All-Time-High",
     value=preset_config.get("ltv_relative_to_ath", False),
-    key="ltv_relative_to_ath_input",
-    help="When enabled, the Loan-to-Value (LTV) is calculated relative to Bitcoin's all-time high instead of the current price. "
-         "This means that rebalancing actions are only triggered by significant market extremes — "
-         "near global highs or lows — rather than short-term price movements."
+    key="ltv_relative_to_ath_input"
 )
 
 enable_sell_input = st.checkbox("Enable Sell-Rebalancing", value=preset_config.get("enable_sell", True),
                                 key="enable_sell_input")
 if enable_sell_input:
-
     max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv_input / 100 - 0.01), 3)
     rebalance_sell_input = st.slider(
         "Sell Threshold (%)",
@@ -501,7 +498,7 @@ if enable_sell_input:
         key="rebalance_sell_factor_input"
     )
 else:
-    rebalance_sell_input = 10
+    rebalance_sell_input = 0
     rebalance_sell_factor_input = 100
 
 enable_buy_input = st.checkbox("Enable Buy-Rebalancing", value=preset_config.get("enable_buy", True),
@@ -974,9 +971,8 @@ def simulate_strategy_de(params):
 
         if not any(entry.get("Action", "").lower() == "sell" for entry in rebalancing_log):
             strategy_cfg["enable_sell"] = False
-            strategy_cfg["ltv_relative_to_ath"] = False
-            strategy_cfg["rebalance_sell"] = 10
-            strategy_cfg["rebalance_sell_factor"] = 100
+            strategy_cfg["rebalance_sell"] = 0
+            strategy_cfg["rebalance_sell_factor"] = 0
 
         if net_btc_delta > st.session_state["current_best_delta_btc"]:
             st.session_state["current_best_delta_btc"] = net_btc_delta
@@ -1018,64 +1014,20 @@ if st.session_state.get("optimization_triggered", False):
         def callback_report(xk, convergence):
             return st.session_state.get("stop_optimization", False)
 
-        # Batch-Optimierung über Jahre und Liquidierungs-LTV
-        batch_optimization_results = []
+        st.session_state["current_best_delta_btc"] = - 0.1
+        st.session_state["best_strategy_result"] = None
+        st.session_state["optimization_results"] = None
 
-        for years in range(1, 11):
-            for liq_ltv in range(50, 101, 10):
-                print(f"--- Optimizing for {years} years and Liquidation LTV {liq_ltv} ---")
-
-                # Setze Simulationsparameter im State
-                st.session_state["sim_years"] = years
-                st.session_state["liquidation_ltv"] = liq_ltv
-
-                df_raw["snapped_at"] = pd.to_datetime(df_raw["snapped_at"])
-                df = df_raw.set_index("snapped_at")["price"].sort_index()
-                end_date = df.index.max()
-                start_date = end_date - pd.DateOffset(years=years)
-                price_series = df.loc[start_date:end_date]
-                price_rel = price_series / price_series.iloc[0]
-                simulated_prices = price_rel * btc_price
-                future_dates = pd.date_range(start=datetime.date.today(), periods=len(simulated_prices), freq='D')
-                df = pd.DataFrame({'price': simulated_prices.values}, index=future_dates)
-
-                st.session_state["price_df"] = df
-
-
-                # Leere vorherige Werte
-                st.session_state["current_best_strategy"] = None
-                st.session_state["current_best_delta_btc"] = -float("inf")
-
-
-
-
-                # Führe Optimierung aus
-                result = differential_evolution(
-                    simulate_strategy_de,
-                    de_bounds,
-                    strategy='best1bin',
-                    maxiter=30,
-                    popsize=15,
-                    tol=0.01,
-                    seed=42,
-                    callback=callback_report,
-                )
-
-                best = st.session_state.get("best_strategy_result", None)
-                delta = st.session_state.get("current_best_delta_btc", None)
-
-                if best is not None and delta is not None:
-                    print(best)
-                    batch_optimization_results.append({
-                        "years": years,
-                        "liq_ltv": liq_ltv,
-                        "strategy": best,
-                        "net_btc_delta": delta,
-                    })
-
-        # Ausgabe als JSON
-        print(json.dumps(batch_optimization_results, indent=2, default=str))
-
+        result = differential_evolution(
+            simulate_strategy_de,
+            de_bounds,
+            strategy='best1bin',
+            maxiter=30,
+            popsize=15,
+            tol=0.01,
+            seed=42,
+            callback=callback_report
+        )
         progress_placeholder.empty()
         best_strategy_placeholder.empty()
         st.session_state.pop("stop_optimization", None)
