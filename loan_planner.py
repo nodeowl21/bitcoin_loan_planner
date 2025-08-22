@@ -346,7 +346,6 @@ new_liquidation_ltv = st.slider(
     int(new_liquidation_ltv_default),
     key="new_liquidation_ltv",
 )
-import uuid
 
 if st.button("Save Loan"):
     loan_id = st.session_state.get("edit_loan_id") or str(uuid.uuid4())
@@ -478,12 +477,16 @@ ltv_input = st.slider(
 ltv_relative_to_ath_input = st.checkbox(
     "Rebalance LTV relative to BTC All-Time-High",
     value=preset_config.get("ltv_relative_to_ath", False),
-    key="ltv_relative_to_ath_input"
+    key="ltv_relative_to_ath_input",
+    help="When enabled, the Loan-to-Value (LTV) is calculated relative to Bitcoin's all-time high instead of the current price. "
+         "This means that rebalancing actions are only triggered by significant market extremes — "
+         "near global highs or lows — rather than short-term price movements."
 )
 
 enable_sell_input = st.checkbox("Enable Sell-Rebalancing", value=preset_config.get("enable_sell", True),
                                 key="enable_sell_input")
 if enable_sell_input:
+
     max_rebalance_threshold_sell = round(max(0.001, 1.0 - ltv_input / 100 - 0.01), 3)
     rebalance_sell_input = st.slider(
         "Sell Threshold (%)",
@@ -498,7 +501,7 @@ if enable_sell_input:
         key="rebalance_sell_factor_input"
     )
 else:
-    rebalance_sell_input = 0
+    rebalance_sell_input = 10
     rebalance_sell_factor_input = 100
 
 enable_buy_input = st.checkbox("Enable Buy-Rebalancing", value=preset_config.get("enable_buy", True),
@@ -962,17 +965,16 @@ def simulate_strategy_de(params):
 
     try:
         results, rebalancing_log = run_simulation(strategy_cfg, st.session_state["btc_owned"], price_df, btc_ath,
-                                    st.session_state["portfolio_loans"])
+                                                  st.session_state["portfolio_loans"])
         net_btc_delta = results["Net BTC"].iloc[-1] - st.session_state["btc_owned"]
-        max_ltv = results["Real LTV"].max()
 
         if any(entry.get("Action", "").lower() == "liquidation" for entry in rebalancing_log):
             net_btc_delta = 0
 
         if not any(entry.get("Action", "").lower() == "sell" for entry in rebalancing_log):
             strategy_cfg["enable_sell"] = False
-            strategy_cfg["rebalance_sell"] = 0
-            strategy_cfg["rebalance_sell_factor"] = 0
+            strategy_cfg["rebalance_sell"] = 10
+            strategy_cfg["rebalance_sell_factor"] = 100
 
         if net_btc_delta > st.session_state["current_best_delta_btc"]:
             st.session_state["current_best_delta_btc"] = net_btc_delta
