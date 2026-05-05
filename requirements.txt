@@ -4,3 +4,6 @@ numpy
 plotly
 requests
 scipy
+fastapi
+uvicorn[standard]
+pydantic

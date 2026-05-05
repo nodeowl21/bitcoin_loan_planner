@@ -43,3 +43,33 @@ git clone https://github.com/yourusername/bitcoin-loan-planner.git
 cd bitcoin-loan-planner
 pip install -r requirements.txt
 streamlit run loan_planner.py
+```
+
+## FastAPI + React App
+
+The Streamlit app is still available, but the migrated web stack lives in `backend/`
+and `frontend/`.
+
+Start the API:
+
+```bash
+pip install -r requirements.txt
+uvicorn backend.app.main:app --reload
+```
+
+Start the React frontend in a second terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open http://localhost:5173.
+
+The API exposes:
+
+- `GET /health`
+- `GET /btc-price?currency=USD`
+- `POST /simulate`
+- `POST /optimize`
