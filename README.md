@@ -73,3 +73,33 @@ The API exposes:
 - `GET /btc-price?currency=USD`
 - `POST /simulate`
 - `POST /optimize`
+
+## Tests
+
+### Backend
+
+The backend ships with a `pytest` suite that pins down the simulation
+mathematics (liquidation handling, rebalancing, ATH-mode, loan lifecycle,
+savings, multi-loan repayment priorities, summary aggregation), the price
+modelling (`Generated`, `Historical`, `Power-Law`), `optimize_strategy`, and the
+FastAPI endpoints.
+
+Install the development dependencies and run the suite from the project root:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+### Frontend
+
+The frontend uses [Vitest](https://vitest.dev/) (`happy-dom` environment) to
+test the pure utilities that were extracted out of `App.tsx`: formatters,
+default settings/presets, portfolio totals and import/export round-trips.
+
+```bash
+cd frontend
+npm install
+npm test          # one-shot run
+npm run test:watch
+```
