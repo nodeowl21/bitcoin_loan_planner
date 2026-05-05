@@ -248,8 +248,15 @@ def run_simulation(
                 weighted_liquidation_ltv = config.liquidation_ltv / 100
 
             if real_ltv > weighted_liquidation_ltv:
-                delta_btc = -current_btc
-                current_btc = 0.0
+                liquidation_value = current_btc * price
+                remaining_value = max(liquidation_value - total_debt, 0.0)
+                new_btc = remaining_value / price if price > 0 else 0.0
+                delta_btc = new_btc - current_btc
+                fiat_delta = -total_debt
+                current_btc = new_btc
+                total_debt = 0.0
+                for loan in active_loans:
+                    loan["paid"] = True
                 action = "Liquidation"
                 liquidated = True
                 rebalanced = True

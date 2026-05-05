@@ -1,234 +1,36 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import Plot from "react-plotly.js";
 
-type Currency = "USD" | "EUR";
-type SimulationMode = "Historical" | "Generated" | "Power-Law";
-type RebalancingInterval = "Daily" | "Weekly" | "Monthly" | "Yearly";
-type ComparisonView = "Net Worth" | "LTV" | "Net BTC Delta (%)";
-
-type Loan = {
-  id: string;
-  platform: string;
-  amount: number;
-  interest: number;
-  start_date: string;
-  term_months: number | null;
-  liquidation_ltv: number;
-  btc_bought: number;
-};
-
-type Portfolio = {
-  btc_owned: number;
-  currency: Currency;
-  btc_price: number;
-  income_per_year: number;
-  btc_saving_rate_percent: number;
-  other_assets: number;
-  loans: Loan[];
-};
-
-type StrategyConfig = {
-  ltv: number;
-  ltv_relative_to_ath: boolean;
-  enable_buy: boolean;
-  rebalance_buy: number;
-  rebalance_buy_factor: number;
-  enable_sell: boolean;
-  rebalance_sell: number;
-  rebalance_sell_factor: number;
-};
-
-type StrategyPresets = Record<string, StrategyConfig>;
-
-type SimulationConfig = {
-  sim_mode: SimulationMode;
-  sim_years: number;
-  exp_return: number;
-  volatility: number;
-  interval: RebalancingInterval;
-  interest: number;
-  liquidation_ltv: number;
-  enable_btc_saving: boolean;
-};
-
-type SeriesPoint = {
-  date: string;
-  price: number;
-  btc: number;
-  total_debt: number;
-  total_interest: number;
-  ltv: number;
-  real_ltv: number;
-  net_worth: number;
-  net_btc: number;
-};
-
-type RebalancingEntry = {
-  date: string;
-  action: string;
-  ltv_before: number;
-  ltv_after: number;
-  btc_delta: number;
-  price: number;
-  fiat_delta: number;
-  new_total_btc: number;
-  new_total_debt: number;
-};
-
-type Summary = {
-  total_btc: number;
-  net_btc: number;
-  total_debt: number;
-  total_interest: number;
-  total_value: number;
-  net_value: number;
-  btc_delta: number;
-  net_btc_delta: number;
-  net_value_delta: number;
-  max_ltv: number;
-  liquidation_risk: "Low" | "Medium" | "High";
-  debt_coverage_ratio: number | null;
-};
-
-type SimulationResponse = {
-  series: SeriesPoint[];
-  rebalancing_log: RebalancingEntry[];
-  summary: Summary;
-};
-
-type OptimizationResponse = {
-  strategy: StrategyConfig;
-  net_btc_delta: number;
-};
-
-type ExportData = {
-  portfolio: Omit<Portfolio, "loans">;
-  loans: Loan[];
-  strategies: {
-    presets: StrategyPresets;
-    default: string;
-  };
-  simulation: SimulationConfig & {
-    selected_sim_strategy: string;
-  };
-};
+import {
+  defaultPortfolio,
+  defaultPresets,
+  defaultSimulation,
+  emptyLoan,
+  presetDescriptions,
+} from "./defaults";
+import { formatCurrency, formatNumber, formatPercent, numberValue } from "./format";
+import { buildExport, parseImportJson } from "./import-export";
+import { calculatePortfolioTotals } from "./portfolio";
+import type {
+  ComparisonView,
+  Currency,
+  ExportData,
+  Loan,
+  OptimizationResponse,
+  Portfolio,
+  RebalancingEntry,
+  RebalancingInterval,
+  SeriesPoint,
+  SimulationConfig,
+  SimulationMode,
+  SimulationResponse,
+  StrategyConfig,
+  StrategyPresets,
+  Summary,
+} from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-const today = new Date().toISOString().slice(0, 10);
-
-const defaultPortfolio: Portfolio = {
-  btc_owned: 1,
-  currency: "USD",
-  btc_price: 100000,
-  income_per_year: 0,
-  btc_saving_rate_percent: 0,
-  other_assets: 0,
-  loans: [],
-};
-
-const defaultPresets: StrategyPresets = {
-  Custom: {
-    ltv: 20,
-    ltv_relative_to_ath: false,
-    enable_buy: true,
-    rebalance_buy: 10,
-    rebalance_buy_factor: 100,
-    enable_sell: true,
-    rebalance_sell: 10,
-    rebalance_sell_factor: 100,
-  },
-  "Defensive HODL": {
-    ltv: 10,
-    ltv_relative_to_ath: false,
-    enable_buy: false,
-    rebalance_buy: 10,
-    rebalance_buy_factor: 100,
-    enable_sell: false,
-    rebalance_sell: 10,
-    rebalance_sell_factor: 100,
-  },
-  "Balanced Rebalancer": {
-    ltv: 20,
-    ltv_relative_to_ath: false,
-    enable_buy: true,
-    rebalance_buy: 10,
-    rebalance_buy_factor: 100,
-    enable_sell: true,
-    rebalance_sell: 10,
-    rebalance_sell_factor: 100,
-  },
-  "Aggressive Stacker": {
-    ltv: 35,
-    ltv_relative_to_ath: false,
-    enable_buy: true,
-    rebalance_buy: 5,
-    rebalance_buy_factor: 100,
-    enable_sell: false,
-    rebalance_sell: 10,
-    rebalance_sell_factor: 100,
-  },
-  "Crash Resilient": {
-    ltv: 15,
-    ltv_relative_to_ath: false,
-    enable_buy: false,
-    rebalance_buy: 10,
-    rebalance_buy_factor: 100,
-    enable_sell: true,
-    rebalance_sell: 10,
-    rebalance_sell_factor: 100,
-  },
-};
-
-const presetDescriptions: Record<string, string> = {
-  "Defensive HODL": "Minimal risk, no rebalancing. Loan is taken once and held. Ideal for conservative holders.",
-  "Balanced Rebalancer": "Moderate LTV, active buy & sell rebalancing. Grows BTC stack with balanced risk.",
-  "Aggressive Stacker": "High LTV with aggressive buy-ins and active rebalancing. Maximum exposure to upside.",
-  "Crash Resilient":
-    "Start with low leverage. Sell if LTV drifts too high. Designed to survive downturns by staying conservative and reducing risk.",
-};
-
-const defaultSimulation: SimulationConfig = {
-  sim_mode: "Historical",
-  sim_years: 5,
-  exp_return: 50,
-  volatility: 5,
-  interval: "Weekly",
-  interest: 12.5,
-  liquidation_ltv: 100,
-  enable_btc_saving: true,
-};
-
-const emptyLoan = (): Loan => ({
-  id: crypto.randomUUID(),
-  platform: "",
-  amount: 0,
-  interest: 5,
-  start_date: today,
-  term_months: null,
-  liquidation_ltv: 100,
-  btc_bought: 0,
-});
-
-function numberValue(event: ChangeEvent<HTMLInputElement>): number {
-  return Number(event.target.value);
-}
-
-function formatCurrency(value: number, currency: Currency, digits = 0): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: digits,
-  }).format(value);
-}
-
-function formatNumber(value: number, maximumFractionDigits = 2): string {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits }).format(value);
-}
-
-function formatPercent(value: number): string {
-  return `${formatNumber(value * 100, 2)}%`;
-}
 
 function App() {
   const [portfolio, setPortfolio] = useState<Portfolio>(defaultPortfolio);
@@ -251,32 +53,23 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [importedFileName, setImportedFileName] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    if (typeof window === "undefined") return "dark";
+    const stored = window.localStorage.getItem("theme");
+    if (stored === "light" || stored === "dark") return stored;
+    return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  });
   const importRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    window.localStorage.setItem("theme", theme);
+  }, [theme]);
 
   const presetNames = Object.keys(strategyPresets);
   const currencySymbol = portfolio.currency === "USD" ? "$" : "EUR ";
 
-  const totals = useMemo(() => {
-    const btcFromLoans = portfolio.loans.reduce((sum, loan) => sum + loan.btc_bought, 0);
-    const totalBtc = portfolio.btc_owned + btcFromLoans;
-    const totalDebt = portfolio.loans.reduce((sum, loan) => {
-      const start = new Date(loan.start_date);
-      const now = new Date();
-      const end = loan.term_months
-        ? new Date(start.getFullYear(), start.getMonth() + loan.term_months, start.getDate())
-        : now;
-      const effectiveEnd = end < now ? end : now;
-      const daysPassed = Math.max(0, (effectiveEnd.getTime() - start.getTime()) / 86_400_000);
-      return sum + loan.amount + (loan.amount * loan.interest * daysPassed) / 36500;
-    }, 0);
-    const portfolioValue = totalBtc * portfolio.btc_price;
-    const ltv = portfolioValue > 0 ? totalDebt / portfolioValue : 1_000_000_000;
-    const totalAssets = portfolioValue + portfolio.other_assets;
-    const netAssets = totalAssets - totalDebt;
-    const btcExposure = totalAssets > 0 ? portfolioValue / totalAssets : 0;
-
-    return { totalBtc, totalDebt, portfolioValue, ltv, totalAssets, netAssets, btcExposure };
-  }, [portfolio]);
+  const totals = useMemo(() => calculatePortfolioTotals(portfolio), [portfolio]);
 
   const ltvChartData = useMemo(() => {
     if (!result) {
@@ -324,6 +117,7 @@ function App() {
         type: "scatter",
         mode: "lines",
         yaxis: "y2",
+        line: { color: "#f7931a" },
         hovertemplate: `Date: %{x}<br>BTC Price: ${currencySymbol}%{y:,.2f}<extra></extra>`,
       },
       {
@@ -541,18 +335,20 @@ function App() {
     }
   }
 
-  function exportData(): ExportData {
-    const { loans, ...portfolioWithoutLoans } = portfolio;
-    return {
-      portfolio: portfolioWithoutLoans,
-      loans,
-      strategies: { presets: strategyPresets, default: defaultStrategy },
-      simulation: { ...simulation, selected_sim_strategy: selectedSimStrategy },
-    };
+  function exportSnapshot(): ExportData {
+    return buildExport({
+      portfolio,
+      strategyPresets,
+      defaultStrategy,
+      simulation,
+      selectedSimStrategy,
+    });
   }
 
   function downloadExport() {
-    const blob = new Blob([JSON.stringify(exportData(), null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(exportSnapshot(), null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -567,14 +363,13 @@ function App() {
       return;
     }
     try {
-      const data = JSON.parse(await file.text()) as Partial<ExportData>;
-      const importedPortfolio = data.portfolio ? { ...defaultPortfolio, ...data.portfolio } : defaultPortfolio;
-      setPortfolio({ ...importedPortfolio, loans: data.loans ?? [] });
-      setStrategyPresets(data.strategies?.presets ?? defaultPresets);
-      setDefaultStrategy(data.strategies?.default ?? "Custom");
-      setSimulation({ ...defaultSimulation, ...data.simulation });
-      setSelectedSimStrategy(data.simulation?.selected_sim_strategy ?? data.strategies?.default ?? "Custom");
-      selectPreset(data.strategies?.default ?? "Custom");
+      const parsed = parseImportJson(await file.text());
+      setPortfolio(parsed.portfolio);
+      setStrategyPresets(parsed.strategyPresets);
+      setDefaultStrategy(parsed.defaultStrategy);
+      setSimulation(parsed.simulation);
+      setSelectedSimStrategy(parsed.selectedSimStrategy);
+      selectPreset(parsed.defaultStrategy);
       setImportedFileName(file.name);
       setStatus("Import complete.");
     } catch {
@@ -620,10 +415,27 @@ function App() {
             This is a Bitcoin Loan Planner for simulating credit strategies aimed at accumulating more Bitcoin over time.
           </p>
         </div>
+        <button
+          type="button"
+          className="theme-toggle"
+          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+          onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+        >
+          <span className="theme-icon" aria-hidden="true" />
+          {theme === "dark" ? "Light Mode" : "Dark Mode"}
+        </button>
       </header>
 
-      {error && <div className="error-box">{error}</div>}
-      {status && <div className="status-box">{status}</div>}
+      <ToastStack
+        toasts={[
+          ...(error ? [{ id: "error", kind: "error" as const, message: error }] : []),
+          ...(status ? [{ id: "status", kind: "status" as const, message: status }] : []),
+        ]}
+        onDismiss={(id) => {
+          if (id === "error") setError(null);
+          if (id === "status") setStatus(null);
+        }}
+      />
 
       <div className="content">
         <section className="app-section" aria-labelledby="portfolio-section-title">
@@ -905,74 +717,82 @@ function App() {
                   />
                 </div>
               </label>
-              <label>
-                Enable Sell-Rebalancing
-                <div className="checkbox-field">
-                  <input
-                    type="checkbox"
-                    checked={strategy.enable_sell}
-                    onChange={(event) => setStrategy({ ...strategy, enable_sell: event.target.checked })}
-                  />
-                </div>
-              </label>
-              {strategy.enable_sell && (
-                <>
-                  <label>
-                    Sell Threshold (%)
+              <div className="row-span grid three">
+                <label>
+                  Enable Sell-Rebalancing
+                  <div className="checkbox-field">
                     <input
-                      min="1"
-                      max="100"
-                      type="number"
-                      value={strategy.rebalance_sell}
-                      onChange={(event) => setStrategy({ ...strategy, rebalance_sell: numberValue(event) })}
+                      type="checkbox"
+                      checked={strategy.enable_sell}
+                      onChange={(event) => setStrategy({ ...strategy, enable_sell: event.target.checked })}
                     />
-                  </label>
-                  <label>
-                    Sell Rebalancing Intensity (%)
+                  </div>
+                </label>
+                {strategy.enable_sell && (
+                  <>
+                    <label>
+                      Sell Threshold (%)
+                      <input
+                        min="1"
+                        max="100"
+                        type="number"
+                        value={strategy.rebalance_sell}
+                        onChange={(event) => setStrategy({ ...strategy, rebalance_sell: numberValue(event) })}
+                      />
+                    </label>
+                    <label>
+                      Sell Rebalancing Intensity (%)
+                      <input
+                        min="1"
+                        max="100"
+                        type="number"
+                        value={strategy.rebalance_sell_factor}
+                        onChange={(event) =>
+                          setStrategy({ ...strategy, rebalance_sell_factor: numberValue(event) })
+                        }
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
+              <div className="row-span grid three">
+                <label>
+                  Enable Buy-Rebalancing
+                  <div className="checkbox-field">
                     <input
-                      min="1"
-                      max="100"
-                      type="number"
-                      value={strategy.rebalance_sell_factor}
-                      onChange={(event) => setStrategy({ ...strategy, rebalance_sell_factor: numberValue(event) })}
+                      type="checkbox"
+                      checked={strategy.enable_buy}
+                      onChange={(event) => setStrategy({ ...strategy, enable_buy: event.target.checked })}
                     />
-                  </label>
-                </>
-              )}
-              <label>
-                Enable Buy-Rebalancing
-                <div className="checkbox-field">
-                  <input
-                    type="checkbox"
-                    checked={strategy.enable_buy}
-                    onChange={(event) => setStrategy({ ...strategy, enable_buy: event.target.checked })}
-                  />
-                </div>
-              </label>
-              {strategy.enable_buy && (
-                <>
-                  <label>
-                    Buy Threshold (%)
-                    <input
-                      min="0"
-                      max="100"
-                      type="number"
-                      value={strategy.rebalance_buy}
-                      onChange={(event) => setStrategy({ ...strategy, rebalance_buy: numberValue(event) })}
-                    />
-                  </label>
-                  <label>
-                    Buy Rebalancing Intensity (%)
-                    <input
-                      min="1"
-                      max="100"
-                      type="number"
-                      value={strategy.rebalance_buy_factor}
-                      onChange={(event) => setStrategy({ ...strategy, rebalance_buy_factor: numberValue(event) })}
-                    />
-                  </label>
-                </>
-              )}
+                  </div>
+                </label>
+                {strategy.enable_buy && (
+                  <>
+                    <label>
+                      Buy Threshold (%)
+                      <input
+                        min="0"
+                        max="100"
+                        type="number"
+                        value={strategy.rebalance_buy}
+                        onChange={(event) => setStrategy({ ...strategy, rebalance_buy: numberValue(event) })}
+                      />
+                    </label>
+                    <label>
+                      Buy Rebalancing Intensity (%)
+                      <input
+                        min="1"
+                        max="100"
+                        type="number"
+                        value={strategy.rebalance_buy_factor}
+                        onChange={(event) =>
+                          setStrategy({ ...strategy, rebalance_buy_factor: numberValue(event) })
+                        }
+                      />
+                    </label>
+                  </>
+                )}
+              </div>
               <label>
                 Name
                 <input value={strategyName} onChange={(event) => setStrategyName(event.target.value)} />
@@ -1157,7 +977,7 @@ function App() {
                   <h3>LTV Development</h3>
                   <Plot
                     data={ltvChartData}
-                    layout={chartLayout("LTV & BTC Price with Rebalancing Events", comparisonView, currencySymbol)}
+                    layout={chartLayout("LTV & BTC Price with Rebalancing Events", comparisonView, currencySymbol, theme)}
                     config={{ responsive: true, displayModeBar: false }}
                     className="plot"
                     useResizeHandler
@@ -1245,7 +1065,7 @@ function App() {
                   <h3>{`Comparison - ${comparisonView}`}</h3>
                   <Plot
                     data={comparisonChartData}
-                    layout={chartLayout(`Strategy Comparison - ${comparisonView}`, comparisonView, currencySymbol)}
+                    layout={chartLayout(`Strategy Comparison - ${comparisonView}`, comparisonView, currencySymbol, theme)}
                     config={{ responsive: true, displayModeBar: false }}
                     className="plot compact-plot"
                     useResizeHandler
@@ -1313,21 +1133,30 @@ function App() {
           </div>
         </section>
 
-        <section className="app-section" aria-labelledby="notes-section-title">
+        <section className="app-section" aria-labelledby="disclaimers-section-title">
           <header className="section-header">
-            <h2 id="notes-section-title">Notes</h2>
+            <h2 id="disclaimers-section-title">Disclaimers & Assumptions</h2>
             <p>Assumptions and limitations for interpreting the simulation output.</p>
           </header>
           <div className="section-body">
-            <section className="panel readonly">
-              <h3>Disclaimers & Assumptions</h3>
-              <ul>
-                <li>Historical data is no guarantee for future performance.</li>
-                <li>By taking out loans, you introduce third-party risk.</li>
-                <li>The simulation excludes taxes, fees, spreads and edge conditions.</li>
-                <li>This tool does not constitute financial advice.</li>
-              </ul>
-            </section>
+            <div className="disclaimer-grid">
+              <article className="disclaimer">
+                <h4>Historical Data</h4>
+                <p>Past price performance is no guarantee for future returns.</p>
+              </article>
+              <article className="disclaimer">
+                <h4>Third-Party Risk</h4>
+                <p>Borrowing introduces counterparty risk - the lender can fail or change terms.</p>
+              </article>
+              <article className="disclaimer">
+                <h4>Simplified Model</h4>
+                <p>Taxes, fees, spreads and edge conditions are excluded from the simulation.</p>
+              </article>
+              <article className="disclaimer">
+                <h4>Not Financial Advice</h4>
+                <p>This tool is for educational purposes only and does not constitute financial advice.</p>
+              </article>
+            </div>
           </div>
         </section>
       </div>
@@ -1335,23 +1164,44 @@ function App() {
   );
 }
 
-function chartLayout(title: string, view: ComparisonView | string, currencySymbol: string) {
+function chartLayout(
+  title: string,
+  view: ComparisonView | string,
+  currencySymbol: string,
+  theme: "dark" | "light",
+) {
   const isComparison = view === "Net Worth" || view === "LTV" || view === "Net BTC Delta (%)";
+  const isDark = theme === "dark";
+  const gridColor = isDark ? "rgba(139, 148, 158, 0.18)" : "rgba(31, 35, 40, 0.08)";
+  const axisColor = isDark ? "#8b949e" : "#57606a";
+  const textColor = isDark ? "#e6edf3" : "#1f2328";
   return {
     autosize: true,
-    title,
+    title: { text: title, font: { color: textColor, size: 14 } },
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+    font: { color: textColor, family: "Inter, system-ui, sans-serif" },
+    colorway: ["#58a6ff", "#3fb950", "#d2a8ff", "#f778ba", "#56d4dd", "#a371f7", "#ffa657"],
     margin: { l: 60, r: 60, t: 60, b: 120 },
     xaxis: {
-      title: "Date",
+      title: { text: "Date", font: { color: axisColor } },
+      gridcolor: gridColor,
+      zerolinecolor: gridColor,
+      tickfont: { color: axisColor },
     },
     yaxis: {
-      title: isComparison ? view : "LTV",
+      title: { text: isComparison ? view : "LTV", font: { color: axisColor } },
       tickformat: view === "LTV" || view === "Net BTC Delta (%)" ? ".0%" : undefined,
+      gridcolor: gridColor,
+      zerolinecolor: gridColor,
+      tickfont: { color: axisColor },
     },
     yaxis2: {
-      title: `BTC Price (${currencySymbol})`,
+      title: { text: `BTC Price (${currencySymbol})`, font: { color: axisColor } },
       overlaying: "y",
       side: "right",
+      gridcolor: gridColor,
+      tickfont: { color: axisColor },
     },
     legend: {
       orientation: "h",
@@ -1359,6 +1209,8 @@ function chartLayout(title: string, view: ComparisonView | string, currencySymbo
       y: -0.25,
       xanchor: "center",
       x: 0.5,
+      font: { color: textColor },
+      bgcolor: "rgba(0,0,0,0)",
     },
   };
 }
@@ -1380,6 +1232,41 @@ function InfoTip({ text }: { text: string }) {
     <span className="info-tip" role="img" aria-label={text} title={text}>
       ?
     </span>
+  );
+}
+
+type ToastKind = "status" | "error";
+
+type Toast = {
+  id: string;
+  kind: ToastKind;
+  message: string;
+};
+
+function ToastStack({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  return (
+    <div className="toast-stack" aria-live="polite">
+      {toasts.map((toast) => (
+        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+      ))}
+    </div>
+  );
+}
+
+function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: string) => void }) {
+  useEffect(() => {
+    const timeout = toast.kind === "error" ? 6000 : 3000;
+    const handle = window.setTimeout(() => onDismiss(toast.id), timeout);
+    return () => window.clearTimeout(handle);
+  }, [toast.id, toast.kind, toast.message, onDismiss]);
+
+  return (
+    <div className={`toast ${toast.kind}`} role={toast.kind === "error" ? "alert" : "status"}>
+      <span>{toast.message}</span>
+      <button type="button" className="toast-dismiss" aria-label="Dismiss" onClick={() => onDismiss(toast.id)}>
+        ×
+      </button>
+    </div>
   );
 }
 
