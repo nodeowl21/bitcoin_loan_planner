@@ -683,4 +683,37 @@
       opacity: 1;
     }
   }
+
+  .app-footer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-lg) var(--space);
+    margin-top: var(--space);
+    border-top: 1px solid var(--border);
+    text-align: center;
+    color: var(--text-muted);
+  }
+
+  .app-footer a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .app-footer a:hover,
+  .app-footer a:focus-visible {
+    text-decoration: underline;
+  }
+
+  .footer-tip {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text);
+  }
+
+  .footer-meta {
+    margin: 0;
+    font-size: 0.875rem;
+  }
 }

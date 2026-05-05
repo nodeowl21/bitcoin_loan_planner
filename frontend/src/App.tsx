@@ -1159,6 +1159,28 @@ function App() {
             </div>
           </div>
         </section>
+
+        <footer className="app-footer">
+          <p className="footer-tip">
+            <span aria-hidden="true">🧡</span> If you like this tool, you can support it with a{" "}
+            <span aria-hidden="true">⚡</span> Lightning tip:{" "}
+            <a href="https://strike.me/nodeowl21" target="_blank" rel="noopener noreferrer">
+              <strong>strike.me/nodeowl21</strong>
+            </a>
+          </p>
+          <p className="footer-meta">
+            © {new Date().getFullYear()}{" "}
+            <a href="mailto:nodeowl21@proton.me">nodeowl21</a> &middot;{" "}
+            <a
+              href="https://github.com/nodeowl21/bitcoin_loan_planner"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              GitHub
+            </a>{" "}
+            &middot; Open Source &middot; No Data Collected &middot; Bitcoin only
+          </p>
+        </footer>
       </div>
     </main>
   );
