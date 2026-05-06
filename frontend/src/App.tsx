@@ -31,6 +31,8 @@ import type {
 } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const FIREFISH_AFFILIATE_URL =
+  import.meta.env.VITE_FIREFISH_AFFILIATE_URL ?? "https://firefish.io?ref=nodeowl21";
 
 function App() {
   const [portfolio, setPortfolio] = useState<Portfolio>(defaultPortfolio);
@@ -655,7 +657,7 @@ function App() {
                   />
                 </label>
               </div>
-              <div className="button-row">
+              <div className="button-row loan-button-row">
                 <button type="button" onClick={saveLoan}>
                   {editingLoanId ? "Update Loan" : "Save Loan"}
                 </button>
@@ -670,6 +672,16 @@ function App() {
                     Cancel Edit
                   </button>
                 )}
+                <span className="loan-affiliate-inline">
+                  Looking for a Bitcoin-backed loan? Try{" "}
+                  <a href={FIREFISH_AFFILIATE_URL} target="_blank" rel="noopener noreferrer sponsored">
+                    Firefish
+                  </a>
+                  <span className="loan-affiliate-meta">
+                    {" "}
+                    — use referral code <strong>nodeowl21</strong> for 30% off your first loan.
+                  </span>
+                </span>
               </div>
             </section>
 
@@ -948,7 +960,10 @@ function App() {
                   />
                 </label>
                 <label>
-                  Enable BTC Saving (daily)
+                  <span className="label-with-info">
+                    Enable BTC Saving (daily)
+                    <InfoTip text="If enabled, every simulated day adds Bitcoin from your salary: daily fiat = (Income per year ÷ 365) × (BTC saving rate % ÷ 100 from Portfolio), then converted to BTC at that day’s simulated price. Set income and saving rate under Portfolio. If income is zero or the saving rate is 0%, nothing is added. Turn off to run the simulation without this stacking effect." />
+                  </span>
                   <div className="checkbox-field">
                     <input
                       type="checkbox"
