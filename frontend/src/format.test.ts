@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCurrency, formatNumber, formatPercent, numberValue } from "./format";
+import {
+  deltaTone,
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+  formatSignedCurrency,
+  formatSignedNumber,
+  numberValue,
+} from "./format";
 
 describe("formatCurrency", () => {
   it("formats USD without fractional digits by default", () => {
@@ -41,6 +49,35 @@ describe("formatPercent", () => {
 
   it("renders negative values", () => {
     expect(formatPercent(-0.05)).toBe("-5%");
+  });
+});
+
+describe("formatSignedNumber", () => {
+  it("shows a plus sign for positive values", () => {
+    expect(formatSignedNumber(1.5)).toBe("+1.5");
+  });
+
+  it("shows a minus sign for negative values", () => {
+    expect(formatSignedNumber(-2.25)).toBe("-2.25");
+  });
+
+  it("omits a sign for zero", () => {
+    expect(formatSignedNumber(0)).toBe("0");
+  });
+});
+
+describe("formatSignedCurrency", () => {
+  it("shows explicit signs for non-zero USD", () => {
+    expect(formatSignedCurrency(100, "USD", 2)).toBe("+$100.00");
+    expect(formatSignedCurrency(-50, "USD", 2)).toBe("-$50.00");
+  });
+});
+
+describe("deltaTone", () => {
+  it("classifies by epsilon", () => {
+    expect(deltaTone(0.001, 1e-9)).toBe("positive");
+    expect(deltaTone(-0.001, 1e-9)).toBe("negative");
+    expect(deltaTone(1e-12, 1e-9)).toBe("neutral");
   });
 });
 

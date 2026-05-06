@@ -75,7 +75,7 @@ export const presetDescriptions: Record<string, string> = {
 
 export const defaultSimulation: SimulationConfig = {
   sim_mode: "Historical",
-  sim_years: 5,
+  sim_years: 3,
   exp_return: 50,
   volatility: 5,
   interval: "Weekly",

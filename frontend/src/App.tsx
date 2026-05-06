@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, CSSProperties } from "react";
 import Plot from "react-plotly.js";
 
 import {
@@ -9,7 +9,15 @@ import {
   emptyLoan,
   presetDescriptions,
 } from "./defaults";
-import { formatCurrency, formatNumber, formatPercent, numberValue } from "./format";
+import {
+  deltaTone,
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+  formatSignedCurrency,
+  formatSignedNumber,
+  numberValue,
+} from "./format";
 import { buildExport, parseImportJson } from "./import-export";
 import { calculatePortfolioTotals } from "./portfolio";
 import type {
@@ -1035,8 +1043,22 @@ function App() {
                 <section className="panel readonly">
                   <h3>Summary</h3>
                   <div className="summary-grid">
-                    <Metric label="Total BTC" value={`${formatNumber(result.summary.total_btc, 6)} BTC`} />
-                    <Metric label="Net BTC" value={`${formatNumber(result.summary.net_btc, 6)} BTC`} />
+                    <Metric
+                      label="Total BTC"
+                      value={`${formatNumber(result.summary.total_btc, 6)} BTC`}
+                      delta={{
+                        text: `Δ ${formatSignedNumber(result.summary.btc_delta, 6)} BTC`,
+                        tone: deltaTone(result.summary.btc_delta, 1e-12),
+                      }}
+                    />
+                    <Metric
+                      label="Net BTC"
+                      value={`${formatNumber(result.summary.net_btc, 6)} BTC`}
+                      delta={{
+                        text: `Δ ${formatSignedNumber(result.summary.net_btc_delta, 6)} BTC`,
+                        tone: deltaTone(result.summary.net_btc_delta, 1e-12),
+                      }}
+                    />
                     <Metric
                       label="Total Debt (incl. interest)"
                       value={formatCurrency(result.summary.total_debt, portfolio.currency, 2)}
@@ -1049,6 +1071,10 @@ function App() {
                     <Metric
                       label="Net Value"
                       value={formatCurrency(result.summary.net_value, portfolio.currency, 2)}
+                      delta={{
+                        text: `Δ ${formatSignedCurrency(result.summary.net_value_delta, portfolio.currency, 2)}`,
+                        tone: deltaTone(result.summary.net_value_delta, 0.005),
+                      }}
                     />
                     <Metric
                       label="Total Interest Paid"
@@ -1280,14 +1306,54 @@ function chartLayout(
   };
 }
 
-function Metric({ label, value, info }: { label: string; value: string; info?: string }) {
+type MetricDelta = { text: string; tone: "positive" | "negative" | "neutral" };
+
+const METRIC_DELTA_STYLE: Record<MetricDelta["tone"], CSSProperties> = {
+  positive: {
+    color: "var(--positive)",
+    backgroundColor: "var(--positive-soft)",
+    boxShadow: "inset 0 0 0 1px var(--positive-ring)",
+  },
+  negative: {
+    color: "var(--danger)",
+    backgroundColor: "var(--danger-soft)",
+    boxShadow: "inset 0 0 0 1px var(--danger-ring)",
+  },
+  neutral: {
+    color: "var(--text-muted)",
+    backgroundColor: "var(--surface-muted)",
+    boxShadow: "inset 0 0 0 1px var(--border)",
+    fontWeight: 500,
+  },
+};
+
+function Metric({
+  label,
+  value,
+  info,
+  delta,
+}: {
+  label: string;
+  value: string;
+  info?: string;
+  delta?: MetricDelta;
+}) {
   return (
     <div className="metric">
-      <span>
+      <span className="metric-label">
         {label}
         {info && <InfoTip text={info} />}
       </span>
       <strong>{value}</strong>
+      {delta ? (
+        <span
+          className={`metric-delta metric-delta--${delta.tone}`}
+          style={METRIC_DELTA_STYLE[delta.tone]}
+          title="Change vs. simulation start"
+        >
+          {delta.text}
+        </span>
+      ) : null}
     </div>
   );
 }
