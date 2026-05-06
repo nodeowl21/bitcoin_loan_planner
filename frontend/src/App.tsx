@@ -120,16 +120,44 @@ function App() {
         line: { color: "#f7931a" },
         hovertemplate: `Date: %{x}<br>BTC Price: ${currencySymbol}%{y:,.2f}<extra></extra>`,
       },
-      {
-        x: result.rebalancing_log.map((entry) => entry.date),
-        y: result.rebalancing_log.map((entry) => entry.ltv_before),
-        text: result.rebalancing_log.map((entry) => `${entry.action}: ${entry.btc_delta.toFixed(6)} BTC`),
-        name: "Rebalancing Events",
-        type: "scatter",
-        mode: "markers",
-        yaxis: "y",
-        hovertemplate: "%{text}<br>Date: %{x}<br>LTV: %{y:.2%}<extra></extra>",
-      },
+      ...(() => {
+        const log = result.rebalancing_log;
+        const buys = log.filter((e) => e.action === "Buy");
+        const sells = log.filter((e) => e.action === "Sell");
+        const other = log.filter((e) => e.action !== "Buy" && e.action !== "Sell");
+        const markerTrace = (
+          entries: typeof log,
+          name: string,
+          color: string,
+          lineColor: string,
+        ) =>
+          entries.length === 0
+            ? []
+            : [
+                {
+                  x: entries.map((entry) => entry.date),
+                  y: entries.map((entry) => entry.ltv_before),
+                  text: entries.map(
+                    (entry) => `${entry.action}: ${entry.btc_delta >= 0 ? "+" : ""}${entry.btc_delta.toFixed(6)} BTC`,
+                  ),
+                  name,
+                  type: "scatter" as const,
+                  mode: "markers" as const,
+                  yaxis: "y",
+                  marker: {
+                    color,
+                    size: 10,
+                    line: { color: lineColor, width: 1.5 },
+                  },
+                  hovertemplate: "%{text}<br>Date: %{x}<br>LTV: %{y:.2%}<extra></extra>",
+                },
+              ];
+        return [
+          ...markerTrace(buys, "Buy", "#22c55e", "#15803d"),
+          ...markerTrace(sells, "Sell", "#ef4444", "#b91c1c"),
+          ...markerTrace(other, "Other events", "#94a3b8", "#64748b"),
+        ];
+      })(),
     ];
   }, [currencySymbol, result, selectedSimStrategy, strategy, strategyPresets]);
 
@@ -977,7 +1005,7 @@ function App() {
                   <h3>LTV Development</h3>
                   <Plot
                     data={ltvChartData}
-                    layout={chartLayout("LTV & BTC Price with Rebalancing Events", comparisonView, currencySymbol, theme)}
+                    layout={chartLayout("LTV & BTC Price (rebalancing markers)", comparisonView, currencySymbol, theme)}
                     config={{ responsive: true, displayModeBar: false }}
                     className="plot"
                     useResizeHandler
