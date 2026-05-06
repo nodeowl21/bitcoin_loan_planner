@@ -83,6 +83,26 @@ When `frontend/dist` exists (e.g. after `npm run build`), the same FastAPI app
 also serves the built SPA from `/` so a single process can host UI + API (used
 for Docker / Render).
 
+### Price data (`btc-usd-max.csv`, `bitcoin_data.csv`)
+
+Both files live at the **repository root** and serve **different** purposes:
+
+| File | Used for |
+|------|-----------|
+| `btc-usd-max.csv` | **Historical** simulation mode and **`get_btc_ath()`** (LTV vs ATH). The code only needs **`snapped_at`** and **`price`**; extra columns are kept for compatibility. |
+| `bitcoin_data.csv` | **Power-Law** mode only (`Date`, `Value`); rows with `Value <= 0` are ignored when fitting the curve. |
+
+If you only use **Generated** random walks, the CSVs are still read for ATH unless you change the code — so keep them in the repo for a working default.
+
+**Refreshing to the latest daily closes** (no API key; uses [CryptoCompare](https://www.cryptocompare.com/) — respect their fair-use / attribution guidelines):
+
+```bash
+pip install requests   # or use the project venv (already has requests)
+python3 scripts/update_price_data.py
+```
+
+That overwrites both CSVs in one run. Older snapshots were often a manual **CoinGecko** export; CoinGecko’s public `market_chart` API may require a key or return errors from some networks, so the script uses CryptoCompare instead.
+
 ## Deploy on Render (free tier)
 
 You need:
