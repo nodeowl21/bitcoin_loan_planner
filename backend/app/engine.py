@@ -17,20 +17,77 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 HISTORICAL_PRICE_FILE = PROJECT_ROOT / "btc-usd-max.csv"
 POWER_LAW_PRICE_FILE = PROJECT_ROOT / "bitcoin_data.csv"
 
+# Identifiable UA: some APIs throttle or block the default Python-requests user agent.
+_HTTP_HEADERS = {
+    "User-Agent": "BitcoinLoanPlanner/1.0 (+https://github.com/nodeowl21/bitcoin_loan_planner)",
+}
 
-def get_live_btc_price(currency: str) -> float | None:
+
+def _price_binance(symbol: str) -> float | None:
+    try:
+        response = requests.get(
+            "https://api.binance.com/api/v3/ticker/price",
+            params={"symbol": symbol},
+            timeout=12,
+            headers=_HTTP_HEADERS,
+        )
+        response.raise_for_status()
+        return float(response.json()["price"])
+    except Exception:
+        return None
+
+
+def _price_coinbase(vs: str) -> float | None:
+    """vs is the quote currency for Coinbase, e.g. USD or EUR."""
+    try:
+        response = requests.get(
+            f"https://api.coinbase.com/v2/prices/BTC-{vs.upper()}/spot",
+            timeout=12,
+            headers=_HTTP_HEADERS,
+        )
+        response.raise_for_status()
+        return float(response.json()["data"]["amount"])
+    except Exception:
+        return None
+
+
+def _price_coingecko(currency: str) -> float | None:
     try:
         url = "https://api.coingecko.com/api/v3/simple/price"
         response = requests.get(
             url,
             params={"ids": "bitcoin", "vs_currencies": currency.lower()},
-            timeout=5,
+            timeout=12,
+            headers=_HTTP_HEADERS,
         )
         response.raise_for_status()
         data = response.json()
         return float(data["bitcoin"][currency.lower()])
     except Exception:
         return None
+
+
+def get_live_btc_price(currency: str) -> float | None:
+    """Spot price for BTC. Uses several providers: CoinGecko often rate-limits or
+    blocks datacenter IPs (e.g. Render), so Binance/Coinbase are tried first."""
+    cur = (currency or "USD").upper()
+    if cur == "USD":
+        price = _price_binance("BTCUSDT")
+        if price is not None:
+            return price
+        price = _price_coinbase("USD")
+        if price is not None:
+            return price
+        return _price_coingecko("USD")
+    if cur == "EUR":
+        price = _price_binance("BTCEUR")
+        if price is not None:
+            return price
+        price = _price_coinbase("EUR")
+        if price is not None:
+            return price
+        return _price_coingecko("EUR")
+    return _price_coingecko(cur)
 
 
 def generate_random_walk(
