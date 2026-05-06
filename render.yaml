@@ -1,0 +1,9 @@
+# Render Blueprint (optional): "New" → "Blueprint" → connect repo, or add manually.
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: loan-planner
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health

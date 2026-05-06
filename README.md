@@ -67,12 +67,57 @@ npm run dev
 
 Then open http://localhost:5173.
 
+The dev server proxies `/health`, `/btc-price`, `/simulate`, and `/optimize` to
+`http://127.0.0.1:8000`, so you do **not** need `VITE_API_BASE_URL` for local
+development. If you prefer a direct URL instead, set e.g.
+`VITE_API_BASE_URL=http://127.0.0.1:8000` in `frontend/.env.local`.
+
 The API exposes:
 
 - `GET /health`
 - `GET /btc-price?currency=USD`
 - `POST /simulate`
 - `POST /optimize`
+
+When `frontend/dist` exists (e.g. after `npm run build`), the same FastAPI app
+also serves the built SPA from `/` so a single process can host UI + API (used
+for Docker / Render).
+
+## Deploy on Render (free tier)
+
+You need:
+
+1. A **GitHub** (or GitLab) account and this repository pushed there.
+2. A **Render** account ([render.com](https://render.com)) — sign in with GitHub.
+3. The repo must contain **`btc-usd-max.csv`** and **`bitcoin_data.csv`** at
+   the root (the API reads them for historical / power-law modes).
+
+**Option A — Blueprint (recommended)**
+
+1. In Render: **New** → **Blueprint**.
+2. Connect the repository and select the branch.
+3. Render reads [`render.yaml`](render.yaml) and creates a **Web Service**
+   (Docker, free plan).
+4. After the first deploy, open the service URL (e.g. `https://loan-planner.onrender.com`).
+
+**Option B — Manual Web Service**
+
+1. **New** → **Web Service** → connect the repo.
+2. **Runtime:** Docker (or “Dockerfile”).
+3. **Instance type:** Free.
+4. **Dockerfile path:** `Dockerfile` (root).
+5. Deploy. Health check can use path `/health`.
+
+The **Dockerfile** builds the frontend and copies `frontend/dist` into the
+image; **uvicorn** serves the API and the static UI on the same host, so no CORS
+configuration is required for production.
+
+**Caveats (free tier):** The service **spins down** after idle time; the first
+request after that can take **~30–60 seconds** (cold start). Heavy `/optimize`
+runs may occasionally hit a **request timeout** on very small instance types.
+
+Optional: set **`CORS_ORIGINS`** in Render’s environment if you ever split
+frontend and API onto different origins (comma-separated URLs).
 
 ## Tests
 
