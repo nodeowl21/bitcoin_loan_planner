@@ -34,6 +34,7 @@ describe("calculatePortfolioTotals", () => {
   it("returns plain totals for an empty portfolio", () => {
     const totals = calculatePortfolioTotals(makePortfolio({ loans: [] }));
     expect(totals.totalBtc).toBe(1);
+    expect(totals.netBtc).toBe(1);
     expect(totals.totalDebt).toBe(0);
     expect(totals.portfolioValue).toBe(100_000);
     expect(totals.ltv).toBe(0);
@@ -42,10 +43,11 @@ describe("calculatePortfolioTotals", () => {
 
   it("includes BTC bought via loans in totalBtc", () => {
     const portfolio = makePortfolio({
-      loans: [makeLoan({ btc_bought: 0.5 })],
+      loans: [makeLoan({ btc_bought: 0.5, amount: 0 })],
     });
     const totals = calculatePortfolioTotals(portfolio);
     expect(totals.totalBtc).toBeCloseTo(1.5);
+    expect(totals.netBtc).toBeCloseTo(1.5);
   });
 
   it("computes accrued interest for a still-running loan", () => {
@@ -86,6 +88,18 @@ describe("calculatePortfolioTotals", () => {
     expect(totals.ltv).toBe(1_000_000_000);
     expect(totals.btcExposure).toBe(0);
     expect(totals.totalAssets).toBe(50_000);
+  });
+
+  it("net BTC subtracts debt in BTC at the portfolio price", () => {
+    const portfolio = makePortfolio({
+      btc_owned: 1,
+      btc_price: 100_000,
+      loans: [makeLoan({ amount: 50_000, interest: 0, start_date: "2024-01-01" })],
+    });
+    const totals = calculatePortfolioTotals(portfolio, new Date("2024-01-01"));
+    expect(totals.totalBtc).toBe(1);
+    expect(totals.totalDebt).toBe(50_000);
+    expect(totals.netBtc).toBeCloseTo(0.5);
   });
 
   it("computes BTC exposure as the BTC fraction of total assets", () => {

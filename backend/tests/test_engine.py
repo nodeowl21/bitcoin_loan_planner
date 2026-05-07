@@ -706,7 +706,30 @@ class TestSummary:
         assert summary["total_btc"] == pytest.approx(1.0)
         assert summary["debt_coverage_ratio"] is not None
 
-    def test_summary_high_risk_after_liquidation(self):
+    def test_net_btc_delta_is_end_minus_start_net_btc(self):
+        portfolio = make_portfolio(
+            loans=[make_loan(amount=50_000.0, liquidation_ltv=85.0)]
+        )
+        strategy = make_strategy(ltv=20.0)
+        config = make_config(liquidation_ltv=85.0)
+
+        prices = [100_000.0] * 30
+        price_df = make_price_df(prices)
+
+        results, log = run_simulation(
+            strategy=strategy,
+            portfolio=portfolio,
+            config=config,
+            current_btc=1.0,
+            price_df=price_df,
+            reference_value=100_000.0,
+            loans=portfolio.loans,
+        )
+
+        summary = build_summary(results, log, portfolio, config, initial_btc=1.0)
+        start_net = float(results["net_btc"].iloc[0])
+        end_net = float(results["net_btc"].iloc[-1])
+        assert summary["net_btc_delta"] == pytest.approx(end_net - start_net)
         portfolio = make_portfolio(
             loans=[make_loan(amount=80_000.0, liquidation_ltv=85.0)]
         )
@@ -784,6 +807,5 @@ class TestOptimization:
         assert 5 <= strategy["ltv"] <= 80
         assert 0 <= strategy["rebalance_buy"] <= 30
         assert strategy["enable_buy"] is True
-        # net_btc_delta is finite (engine sanitizes inf via _json_float)
+        # net_btc_delta is absolute BTC vs. starting net BTC (can be negative)
         assert math.isfinite(result["net_btc_delta"])
-        assert result["net_btc_delta"] >= 0.0  # liquidated runs collapse to 0

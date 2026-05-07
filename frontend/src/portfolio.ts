@@ -2,6 +2,8 @@ import type { Loan, Portfolio } from "./types";
 
 export type PortfolioTotals = {
   totalBtc: number;
+  /** BTC stack minus debt expressed in BTC at `portfolio.btc_price` (same idea as simulation `net_btc`). */
+  netBtc: number;
   totalDebt: number;
   portfolioValue: number;
   ltv: number;
@@ -29,11 +31,14 @@ export function calculatePortfolioTotals(portfolio: Portfolio, now: Date = new D
 
   const totalDebt = portfolio.loans.reduce((sum, loan) => sum + accruedDebtForLoan(loan, now), 0);
 
+  const price = portfolio.btc_price;
+  const netBtc = price > 1e-12 ? totalBtc - totalDebt / price : totalBtc;
+
   const portfolioValue = totalBtc * portfolio.btc_price;
   const ltv = portfolioValue > 0 ? totalDebt / portfolioValue : SAFE_INFINITY;
   const totalAssets = portfolioValue + portfolio.other_assets;
   const netAssets = totalAssets - totalDebt;
   const btcExposure = totalAssets > 0 ? portfolioValue / totalAssets : 0;
 
-  return { totalBtc, totalDebt, portfolioValue, ltv, totalAssets, netAssets, btcExposure };
+  return { totalBtc, netBtc, totalDebt, portfolioValue, ltv, totalAssets, netAssets, btcExposure };
 }

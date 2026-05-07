@@ -434,6 +434,7 @@ def build_summary(
     end_price = float(last["price"])
     start_price = float(first["price"])
     net_btc = float(last["net_btc"])
+    initial_net_btc = float(first["net_btc"])
     total_value = total_btc * end_price
     start_value = initial_btc * start_price
     net_value = float(last["net_worth"])
@@ -460,7 +461,7 @@ def build_summary(
         "total_value": _json_float(total_value),
         "net_value": _json_float(net_value),
         "btc_delta": _json_float(total_btc - initial_btc),
-        "net_btc_delta": _json_float(net_btc - initial_btc),
+        "net_btc_delta": _json_float(net_btc - initial_net_btc),
         "net_value_delta": _json_float(net_value - start_value),
         "max_ltv": _json_float(max_ltv),
         "liquidation_risk": liquidation_risk,
@@ -535,7 +536,8 @@ def optimize_strategy(request, current_btc_price: float) -> dict:
             reference_value=reference_value,
             loans=request.portfolio.loans,
         )
-        net_btc_delta = float(results["net_btc"].iloc[-1] - initial_btc)
+        initial_net_btc = float(results["net_btc"].iloc[0])
+        net_btc_delta = float(results["net_btc"].iloc[-1] - initial_net_btc)
         if any(entry["action"] == "Liquidation" for entry in rebalancing_log):
             net_btc_delta = 0.0
 

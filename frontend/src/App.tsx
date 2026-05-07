@@ -178,13 +178,14 @@ function App() {
         if (!response) {
           return null;
         }
-        const initialBtc = portfolio.btc_owned + portfolio.loans.reduce((sum, loan) => sum + loan.btc_bought, 0);
+        const startNetBtc = response.series[0]?.net_btc ?? 0;
+        const netBtcDenom = Math.max(Math.abs(startNetBtc), 1e-12);
         const y =
           comparisonView === "Net Worth"
             ? response.series.map((point) => point.net_worth)
             : comparisonView === "LTV"
               ? response.series.map((point) => point.real_ltv)
-              : response.series.map((point) => (point.net_btc - initialBtc) / Math.max(initialBtc, 1e-9));
+              : response.series.map((point) => (point.net_btc - startNetBtc) / netBtcDenom);
         return {
           x: response.series.map((point) => point.date),
           y,
@@ -198,7 +199,7 @@ function App() {
         };
       })
       .filter(Boolean);
-  }, [comparisonResults, comparisonView, portfolio.btc_owned, portfolio.loans, selectedCompareStrategies]);
+  }, [comparisonResults, comparisonView, selectedCompareStrategies]);
 
   const yearlyRows = useMemo(() => {
     return selectedCompareStrategies.map((name) => {
@@ -206,18 +207,19 @@ function App() {
       if (!response) {
         return { strategy: name, values: [] as string[] };
       }
-      const initialBtc = portfolio.btc_owned + portfolio.loans.reduce((sum, loan) => sum + loan.btc_bought, 0);
+      const startNetBtc = response.series[0]?.net_btc ?? 0;
+      const netBtcDenom = Math.max(Math.abs(startNetBtc), 1e-12);
       const byYear = new Map<number, SeriesPoint>();
       response.series.forEach((point) => byYear.set(new Date(point.date).getFullYear(), point));
       return {
         strategy: name,
         values: Array.from(byYear.entries()).map(([year, point]) => {
-          const delta = (point.net_btc - initialBtc) / Math.max(initialBtc, 1e-9);
+          const delta = (point.net_btc - startNetBtc) / netBtcDenom;
           return `${year}: ${formatPercent(delta)}`;
         }),
       };
     });
-  }, [comparisonResults, portfolio.btc_owned, portfolio.loans, selectedCompareStrategies]);
+  }, [comparisonResults, selectedCompareStrategies]);
 
   function requestBody(strategyForRun: StrategyConfig) {
     return {
@@ -558,7 +560,9 @@ function App() {
               <h3>Summary</h3>
               <div className="summary-grid">
                 <Metric label="Total BTC" value={`${formatNumber(totals.totalBtc, 6)} BTC`} />
+                <Metric label="Net BTC" value={`${formatNumber(totals.netBtc, 6)} BTC`} />
                 <Metric label="Total BTC Value" value={formatCurrency(totals.portfolioValue, portfolio.currency, 2)} />
+                <Metric label="BTC Exposure" value={formatPercent(totals.btcExposure)} />
                 <Metric label="Total Debt" value={formatCurrency(totals.totalDebt, portfolio.currency, 2)} />
                 <Metric label="LTV" value={formatPercent(totals.ltv)} />
                 <Metric label="Annual Income" value={formatCurrency(portfolio.income_per_year, portfolio.currency, 2)} />
@@ -566,7 +570,6 @@ function App() {
                 <Metric label="BTC Saving Rate" value={`${formatNumber(portfolio.btc_saving_rate_percent, 1)}%`} />
                 <Metric label="Total Value" value={formatCurrency(totals.totalAssets, portfolio.currency, 2)} />
                 <Metric label="Net Value" value={formatCurrency(totals.netAssets, portfolio.currency, 2)} />
-                <Metric label="BTC Exposure" value={formatPercent(totals.btcExposure)} />
               </div>
             </section>
           </div>
@@ -1003,7 +1006,8 @@ function App() {
               <section className="panel readonly">
                 <h3>Optimized Strategy</h3>
                 <p>
-                  Net BTC Delta: <strong>{formatPercent(optimized.net_btc_delta)}</strong>
+                  Net BTC Delta:{" "}
+                  <strong>{`${formatSignedNumber(optimized.net_btc_delta, 6)} BTC`}</strong>
                 </p>
                 <pre>{JSON.stringify(optimized.strategy, null, 2)}</pre>
                 <div className="button-row">
