@@ -107,6 +107,10 @@
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 
+  #root {
+    min-width: 0;
+  }
+
   button,
   input,
   select {
@@ -256,9 +260,12 @@
   .app-shell {
     display: grid;
     gap: var(--space-lg);
-    padding: var(--space-lg);
-    max-width: 1400px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: min(1400px, 100%);
     margin: 0 auto;
+    padding: var(--space-lg);
+    min-width: 0;
   }
 
   .hero {
@@ -268,6 +275,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: var(--space);
+    min-width: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background:
@@ -335,10 +343,12 @@
   .content {
     display: grid;
     gap: var(--space-lg);
+    min-width: 0;
   }
 
   .app-section {
     display: grid;
+    min-width: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     background: var(--surface);
@@ -349,6 +359,7 @@
   .section-header {
     display: grid;
     gap: 0.25rem;
+    min-width: 0;
     border-bottom: 1px solid var(--border);
     padding: var(--space-lg);
     background: linear-gradient(180deg, var(--accent-soft), transparent);
@@ -366,21 +377,23 @@
     display: grid;
     gap: var(--space);
     padding: var(--space-lg);
+    min-width: 0;
   }
 
   .section-body.parallel {
-    grid-template-columns: repeat(auto-fit, minmax(var(--card-min), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--card-min)), 1fr));
     align-items: start;
   }
 
   .section-body.parallel-form {
-    grid-template-columns: repeat(auto-fit, minmax(var(--form-card-min), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--form-card-min)), 1fr));
     align-items: start;
   }
 
   .panel {
     display: grid;
     gap: var(--space);
+    min-width: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: var(--space);
@@ -469,7 +482,7 @@
   .summary-grid {
     display: grid;
     gap: var(--space);
-    grid-template-columns: repeat(auto-fit, minmax(var(--metric-min), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--metric-min)), 1fr));
   }
 
   .grid {
@@ -478,11 +491,11 @@
   }
 
   .grid.two {
-    grid-template-columns: repeat(auto-fit, minmax(var(--field-min), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--field-min)), 1fr));
   }
 
   .grid.three {
-    grid-template-columns: repeat(auto-fill, minmax(var(--field-min), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--field-min)), 1fr));
   }
 
   .row-span {
@@ -492,7 +505,7 @@
   .checkbox-grid {
     display: grid;
     gap: 0.5rem;
-    grid-template-columns: repeat(auto-fit, minmax(var(--check-min), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--check-min)), 1fr));
   }
 
   .button-row,
@@ -574,6 +587,12 @@
     transition: border-color 0.15s ease;
   }
 
+  .loan-row > span {
+    flex: 1 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .loan-row:hover {
     border-color: var(--border-strong);
   }
@@ -617,7 +636,7 @@
   .disclaimer-grid {
     display: grid;
     gap: var(--space);
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
   }
 
   .disclaimer {
@@ -783,6 +802,41 @@
   }
 
   @media (max-width: 520px) {
+    .app-shell {
+      padding: var(--space-sm);
+      gap: var(--space);
+    }
+
+    .section-body {
+      padding: var(--space-sm);
+    }
+
+    .section-header {
+      padding: var(--space);
+    }
+
+    .hero {
+      padding: var(--space);
+    }
+
+    .toast-stack {
+      left: var(--space-sm);
+      right: var(--space-sm);
+    }
+
+    .toast {
+      max-width: none;
+      min-width: 0;
+    }
+
+    .plot {
+      min-height: 320px;
+    }
+
+    .compact-plot {
+      min-height: 280px;
+    }
+
     .button-row.loan-button-row .loan-affiliate-inline {
       flex: 1 1 100%;
     }
