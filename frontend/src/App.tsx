@@ -16,8 +16,8 @@ import {
   formatPercent,
   formatSignedCurrency,
   formatSignedNumber,
-  numberValue,
 } from "./format";
+import { NumericInput } from "./NumericInput";
 import { buildExport, parseImportJson } from "./import-export";
 import { calculatePortfolioTotals } from "./portfolio";
 import type {
@@ -500,12 +500,11 @@ function App() {
                 <label>
                   BTC Price ({portfolio.currency === "USD" ? "$" : "EUR"})
                   <div className="inline-input">
-                    <input
-                      min="1"
-                      step="1000"
-                      type="number"
+                    <NumericInput
+                      min={1}
+                      step={1000}
                       value={portfolio.btc_price}
-                      onChange={(event) => setPortfolio({ ...portfolio, btc_price: numberValue(event) })}
+                      onChange={(btc_price) => setPortfolio({ ...portfolio, btc_price })}
                     />
                     <button type="button" onClick={fetchLivePrice}>
                       Live
@@ -514,43 +513,39 @@ function App() {
                 </label>
                 <label>
                   BTC Holdings
-                  <input
-                    min="0"
+                  <NumericInput
+                    min={0}
                     step="0.000001"
-                    type="number"
                     value={portfolio.btc_owned}
-                    onChange={(event) => setPortfolio({ ...portfolio, btc_owned: numberValue(event) })}
+                    onChange={(btc_owned) => setPortfolio({ ...portfolio, btc_owned })}
                   />
                 </label>
                 <label>
                   Annual Income ({portfolio.currency === "USD" ? "$" : "EUR"})
-                  <input
-                    min="0"
-                    step="1000"
-                    type="number"
+                  <NumericInput
+                    min={0}
+                    step={1000}
                     value={portfolio.income_per_year}
-                    onChange={(event) => setPortfolio({ ...portfolio, income_per_year: numberValue(event) })}
+                    onChange={(income_per_year) => setPortfolio({ ...portfolio, income_per_year })}
                   />
                 </label>
                 <label>
                   BTC Saving Rate (% of Income)
-                  <input
-                    min="0"
-                    max="100"
-                    step="0.5"
-                    type="number"
+                  <NumericInput
+                    min={0}
+                    max={100}
+                    step={0.5}
                     value={portfolio.btc_saving_rate_percent}
-                    onChange={(event) => setPortfolio({ ...portfolio, btc_saving_rate_percent: numberValue(event) })}
+                    onChange={(btc_saving_rate_percent) => setPortfolio({ ...portfolio, btc_saving_rate_percent })}
                   />
                 </label>
                 <label>
                   Other Assets ({portfolio.currency === "USD" ? "$" : "EUR"})
-                  <input
-                    min="0"
-                    step="1000"
-                    type="number"
+                  <NumericInput
+                    min={0}
+                    step={1000}
                     value={portfolio.other_assets}
-                    onChange={(event) => setPortfolio({ ...portfolio, other_assets: numberValue(event) })}
+                    onChange={(other_assets) => setPortfolio({ ...portfolio, other_assets })}
                   />
                 </label>
               </div>
@@ -593,33 +588,30 @@ function App() {
                 </label>
                 <label>
                   Loan Amount ({portfolio.currency === "USD" ? "$" : "EUR"})
-                  <input
-                    min="0"
-                    step="1000"
-                    type="number"
+                  <NumericInput
+                    min={0}
+                    step={1000}
                     value={loanDraft.amount}
-                    onChange={(event) => setLoanDraft({ ...loanDraft, amount: numberValue(event) })}
+                    onChange={(amount) => setLoanDraft({ ...loanDraft, amount })}
                   />
                 </label>
                 <label>
                   Interest Rate (% p.a.)
-                  <input
-                    min="0"
-                    max="50"
-                    step="0.1"
-                    type="number"
+                  <NumericInput
+                    min={0}
+                    max={50}
+                    step={0.1}
                     value={loanDraft.interest}
-                    onChange={(event) => setLoanDraft({ ...loanDraft, interest: numberValue(event) })}
+                    onChange={(interest) => setLoanDraft({ ...loanDraft, interest })}
                   />
                 </label>
                 <label>
                   BTC Bought
-                  <input
-                    min="0"
+                  <NumericInput
+                    min={0}
                     step="0.000001"
-                    type="number"
                     value={loanDraft.btc_bought}
-                    onChange={(event) => setLoanDraft({ ...loanDraft, btc_bought: numberValue(event) })}
+                    onChange={(btc_bought) => setLoanDraft({ ...loanDraft, btc_bought })}
                   />
                 </label>
                 <label>
@@ -648,23 +640,22 @@ function App() {
                 {loanDraft.term_months !== null && (
                   <label>
                     Duration (months)
-                    <input
-                      min="1"
-                      max="360"
-                      type="number"
-                      value={loanDraft.term_months}
-                      onChange={(event) => setLoanDraft({ ...loanDraft, term_months: numberValue(event) })}
+                    <NumericInput
+                      integer
+                      min={1}
+                      max={360}
+                      value={loanDraft.term_months!}
+                      onChange={(term_months) => setLoanDraft({ ...loanDraft, term_months })}
                     />
                   </label>
                 )}
                 <label>
                   Liquidation LTV (%)
-                  <input
-                    min="50"
-                    max="100"
-                    type="number"
+                  <NumericInput
+                    min={50}
+                    max={100}
                     value={loanDraft.liquidation_ltv}
-                    onChange={(event) => setLoanDraft({ ...loanDraft, liquidation_ltv: numberValue(event) })}
+                    onChange={(liquidation_ltv) => setLoanDraft({ ...loanDraft, liquidation_ltv })}
                   />
                 </label>
               </div>
@@ -747,14 +738,13 @@ function App() {
               <div className="grid two">
                 <label>
                   Target LTV (%)
-                <input
-                  min="1"
-                  max="100"
-                  type="number"
-                  value={strategy.ltv}
-                  onChange={(event) => setStrategy({ ...strategy, ltv: numberValue(event) })}
-                />
-              </label>
+                  <NumericInput
+                    min={1}
+                    max={100}
+                    value={strategy.ltv}
+                    onChange={(ltv) => setStrategy({ ...strategy, ltv })}
+                  />
+                </label>
               <label>
                 <span className="label-with-info">
                   LTV relative to ATH
@@ -783,24 +773,20 @@ function App() {
                   <>
                     <label>
                       Sell Threshold (%)
-                      <input
-                        min="1"
-                        max="100"
-                        type="number"
+                      <NumericInput
+                        min={1}
+                        max={100}
                         value={strategy.rebalance_sell}
-                        onChange={(event) => setStrategy({ ...strategy, rebalance_sell: numberValue(event) })}
+                        onChange={(rebalance_sell) => setStrategy({ ...strategy, rebalance_sell })}
                       />
                     </label>
                     <label>
                       Sell Rebalancing Intensity (%)
-                      <input
-                        min="1"
-                        max="100"
-                        type="number"
+                      <NumericInput
+                        min={1}
+                        max={100}
                         value={strategy.rebalance_sell_factor}
-                        onChange={(event) =>
-                          setStrategy({ ...strategy, rebalance_sell_factor: numberValue(event) })
-                        }
+                        onChange={(rebalance_sell_factor) => setStrategy({ ...strategy, rebalance_sell_factor })}
                       />
                     </label>
                   </>
@@ -821,24 +807,20 @@ function App() {
                   <>
                     <label>
                       Buy Threshold (%)
-                      <input
-                        min="0"
-                        max="100"
-                        type="number"
+                      <NumericInput
+                        min={0}
+                        max={100}
                         value={strategy.rebalance_buy}
-                        onChange={(event) => setStrategy({ ...strategy, rebalance_buy: numberValue(event) })}
+                        onChange={(rebalance_buy) => setStrategy({ ...strategy, rebalance_buy })}
                       />
                     </label>
                     <label>
                       Buy Rebalancing Intensity (%)
-                      <input
-                        min="1"
-                        max="100"
-                        type="number"
+                      <NumericInput
+                        min={1}
+                        max={100}
                         value={strategy.rebalance_buy_factor}
-                        onChange={(event) =>
-                          setStrategy({ ...strategy, rebalance_buy_factor: numberValue(event) })
-                        }
+                        onChange={(rebalance_buy_factor) => setStrategy({ ...strategy, rebalance_buy_factor })}
                       />
                     </label>
                   </>
@@ -903,34 +885,33 @@ function App() {
                 </label>
                 <label>
                   {simulation.sim_mode === "Historical" ? "Historical Timeframe (years)" : "Number of Simulation Years"}
-                  <input
-                    min="1"
+                  <NumericInput
+                    integer
+                    min={1}
                     max={simulation.sim_mode === "Historical" ? 10 : 20}
-                    type="number"
                     value={simulation.sim_years}
-                    onChange={(event) => setSimulation({ ...simulation, sim_years: numberValue(event) })}
+                    onChange={(sim_years) => setSimulation({ ...simulation, sim_years })}
                   />
                 </label>
                 {simulation.sim_mode === "Generated" && (
                   <>
                     <label>
                       Expected Annual Return (%)
-                      <input
-                        min="-100"
-                        max="200"
-                        type="number"
+                      <NumericInput
+                        allowNegative
+                        min={-100}
+                        max={200}
                         value={simulation.exp_return}
-                        onChange={(event) => setSimulation({ ...simulation, exp_return: numberValue(event) })}
+                        onChange={(exp_return) => setSimulation({ ...simulation, exp_return })}
                       />
                     </label>
                     <label>
                       Daily Volatility (%)
-                      <input
-                        min="1"
-                        max="100"
-                        type="number"
+                      <NumericInput
+                        min={1}
+                        max={100}
                         value={simulation.volatility}
-                        onChange={(event) => setSimulation({ ...simulation, volatility: numberValue(event) })}
+                        onChange={(volatility) => setSimulation({ ...simulation, volatility })}
                       />
                     </label>
                   </>
@@ -951,23 +932,21 @@ function App() {
                 </label>
                 <label>
                   Loan Interest Rate (% p.a.)
-                  <input
-                    min="0"
-                    max="20"
-                    step="0.1"
-                    type="number"
+                  <NumericInput
+                    min={0}
+                    max={20}
+                    step={0.1}
                     value={simulation.interest}
-                    onChange={(event) => setSimulation({ ...simulation, interest: numberValue(event) })}
+                    onChange={(interest) => setSimulation({ ...simulation, interest })}
                   />
                 </label>
                 <label>
                   Liquidation LTV (%)
-                  <input
-                    min="50"
-                    max="100"
-                    type="number"
+                  <NumericInput
+                    min={50}
+                    max={100}
                     value={simulation.liquidation_ltv}
-                    onChange={(event) => setSimulation({ ...simulation, liquidation_ltv: numberValue(event) })}
+                    onChange={(liquidation_ltv) => setSimulation({ ...simulation, liquidation_ltv })}
                   />
                 </label>
                 <label>

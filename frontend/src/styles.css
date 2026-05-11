@@ -422,10 +422,20 @@
     color: var(--accent);
   }
 
-  .panel.readonly .table-wrap,
-  .panel.readonly pre,
+  .panel.readonly .table-wrap {
+    background: var(--surface-elevated);
+  }
+
   .panel.readonly .plot {
-    background: var(--surface);
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface-elevated);
+    overflow: hidden;
+  }
+
+  .panel.readonly pre {
+    background: var(--surface-elevated);
   }
 
   .panel-header {
