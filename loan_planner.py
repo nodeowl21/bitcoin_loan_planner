@@ -788,6 +788,9 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                 daily_btc_bought = daily_saving_fiat / price
                 current_btc += daily_btc_bought
 
+        repay_stream_ltv_before = (
+            total_debt / (current_btc * price) if current_btc * price > 0 else float("inf")
+        )
         for loan in active_loans:
             if loan["paid"] or not loan["end_date"]:
                 continue
@@ -797,6 +800,10 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                 current_btc -= btc_to_sell
                 loan["paid"] = True
                 action = f"Repay: {loan['platform']}"
+                total_debt -= repayment_amount
+                real_ltv_after = (
+                    total_debt / (current_btc * price) if current_btc * price > 0 else float("inf")
+                )
                 rebalancing_log.append({
                     "Date": date.date(),
                     "Action": action,
@@ -804,11 +811,11 @@ def run_simulation(config: dict, current_btc, price_df: pd.DataFrame, reference_
                     "Price": f"{price:.2f} {currency_symbol}",
                     f"{currency_symbol} Spent": f'{- repayment_amount:.2f} {currency_symbol}',
                     "New Total BTC": f"{current_btc:.6f} BTC",
-                    "New Total Debt": f"{(total_debt - repayment_amount):.2f} {currency_symbol}",
-                    "LTV before": real_ltv,
-                    "LTV after": real_ltv
+                    "New Total Debt": f"{total_debt:.2f} {currency_symbol}",
+                    "LTV before": repay_stream_ltv_before,
+                    "LTV after": real_ltv_after,
                 })
-                total_debt -= repayment_amount
+                repay_stream_ltv_before = real_ltv_after
 
         accrued_interest = 0.0
 

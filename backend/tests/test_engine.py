@@ -504,6 +504,42 @@ class TestLoanLifecycle:
         # Repayment around end of month - sanity check
         assert dt.date.fromisoformat(repay["date"]) >= dt.date(2024, 2, 1)
 
+    def test_repay_log_ltv_after_reflects_debt_and_btc_after_repayment(self):
+        """LTV-After muss nach Tilgung aus neuer Schuld und neuem BTC-Bestand folgen."""
+        start = dt.date(2024, 1, 1)
+        portfolio = make_portfolio(
+            loans=[
+                make_loan(
+                    amount=20_000.0,
+                    interest=0.0,
+                    term_months=1,
+                    start_date=start,
+                    liquidation_ltv=95.0,
+                )
+            ]
+        )
+        strategy = make_strategy()
+        config = make_config(liquidation_ltv=95.0)
+
+        prices = [100_000.0] * 60
+        price_df = make_price_df(prices, start_date=start)
+
+        _, log = run_simulation(
+            strategy=strategy,
+            portfolio=portfolio,
+            config=config,
+            current_btc=1.0,
+            price_df=price_df,
+            reference_value=100_000.0,
+            loans=portfolio.loans,
+        )
+
+        repay = next(e for e in log if e["action"].startswith("Repay"))
+        assert repay["ltv_before"] == pytest.approx(0.20)
+        assert repay["ltv_after"] == pytest.approx(0.0)
+        assert repay["new_total_debt"] == 0.0
+        assert repay["new_total_btc"] == pytest.approx(0.8)
+
     def test_btc_saving_increases_btc_balance(self):
         # 36500 USD/year income, 10% saving rate -> 10 USD/day -> 0.0001 BTC/day @ 100k
         portfolio = make_portfolio(

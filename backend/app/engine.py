@@ -245,6 +245,7 @@ def run_simulation(
             total_debt / real_collateral_before_repayments if real_collateral_before_repayments > 0 else float("inf")
         )
 
+        repay_log_ltv_before = real_ltv_before_repayments
         for loan in active_loans:
             if loan["paid"] or not loan["end_date"]:
                 continue
@@ -254,6 +255,10 @@ def run_simulation(
                 current_btc = max(0.0, current_btc - btc_to_sell)
                 loan["paid"] = True
                 total_debt = max(0.0, total_debt - repayment_amount)
+                real_collateral_after = current_btc * price
+                real_ltv_after = (
+                    total_debt / real_collateral_after if real_collateral_after > 0 else float("inf")
+                )
                 rebalancing_log.append(
                     {
                         "date": date.isoformat(),
@@ -263,10 +268,11 @@ def run_simulation(
                         "fiat_delta": _json_float(-repayment_amount),
                         "new_total_btc": _json_float(current_btc),
                         "new_total_debt": _json_float(total_debt),
-                        "ltv_before": _json_float(real_ltv_before_repayments),
-                        "ltv_after": _json_float(real_ltv_before_repayments),
+                        "ltv_before": _json_float(repay_log_ltv_before),
+                        "ltv_after": _json_float(real_ltv_after),
                     }
                 )
+                repay_log_ltv_before = real_ltv_after
 
         accrued_interest = 0.0
         for loan in active_loans:

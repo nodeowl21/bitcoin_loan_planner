@@ -128,7 +128,11 @@ function App() {
         mode: "lines",
         yaxis: "y2",
         line: { color: "#f7931a" },
-        hovertemplate: `Date: %{x}<br>BTC Price: ${currencySymbol}%{y:,.2f}<extra></extra>`,
+        customdata: result.series.map((point) => [point.btc * point.price, point.net_worth]),
+        hovertemplate:
+          `Date: %{x}<br>BTC Price: ${currencySymbol}%{y:,.2f}` +
+          `<br>Total Value: ${currencySymbol}%{customdata[0]:,.2f}` +
+          `<br>Net Value: ${currencySymbol}%{customdata[1]:,.2f}<extra></extra>`,
       },
       ...(() => {
         const log = result.rebalancing_log;
